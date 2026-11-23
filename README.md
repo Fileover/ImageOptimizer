@@ -33,6 +33,7 @@ redistributable (static CRT).
 ImageOptimizer photo.png photo.webp                     # cwebp: lossy q=75, method 6
 ImageOptimizer photo.png photo.webp -q 85               # custom quality (no --lossy needed)
 ImageOptimizer photo.png photo.jxl --lossless           # libjxl lossless, effort 10
+ImageOptimizer photo.png thumb.webp --resize 256x256    # downscale only (512x512 -> 256x256, never upscales)
 ImageOptimizer photo.jpg photo.jxl                      # cjxl lossless JPEG transcode, effort 10
 ImageOptimizer -i photo.png -o photo.jpg                # MozJPEG q=75, progressive, trellis
 ImageOptimizer photo.png optimized.png                  # OxiPNG preset 6 + Zopfli
@@ -79,6 +80,11 @@ Run `ImageOptimizer --help`. Highlights:
   `--jpeg-mode keep|progressive|baseline|auto` (`auto` tests both baseline and progressive for JPEG→JPEG and keeps
   the smaller file), `--png-preset` (0–6, default 6), `--optimize-alpha` (OxiPNG `-a`), `--no-zopfli`,
   `--zopfli-iterations` (default 60), `--zopfli-no-improvement` (default 15).
+* **Downscale-only resize:** `--resize <SPEC>` (`256x256` or `256` fits inside 256×256 preserving aspect ratio;
+  `256x` clamps width; `x256` clamps height; `256x256!` clamps each axis independently). Images already within the
+  requested bounds are never upscaled and keep lossless bitstream fast paths. `--resize-filter` selects the resampling
+  kernel (`lanczos3` default, `catmull-rom`, `triangle`, `gaussian`, `nearest`); transparent images are resized in
+  premultiplied alpha space to prevent dark edge halos.
 * **Execution & safety:** `--jobs N` (files in parallel) × `--threads N` (threads per file) planned together against
   logical CPUs and available RAM; `--recursive`, `--overwrite`, `--dry-run`, `--keep-larger`, `--report`,
   `--max-pixels`, `--strip-metadata`, `--strip-icc`, `--verify=false`, `--config file.json` (CLI wins), `-v/-vv`,

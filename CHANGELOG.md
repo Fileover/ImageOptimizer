@@ -9,6 +9,9 @@
   vs progressive comparison), `--sharp-yuv` for lossy WebP, and `--optimize-alpha` for PNG.
 * Metadata preserved by default across all codecs (`--strip-metadata` / `--strip-icc`); magic-byte detection;
   verification matrix; atomic writes.
+* Downscale-only resizing (`--resize 256x256`, `256x`, `x256`, `256x256!`) with selectable resampling filter
+  (`--resize-filter`, default `lanczos3`), premultiplied-alpha handling, and EXIF orientation normalization; never
+  upscales and keeps lossless bitstream fast paths for images already within bounds.
 * Direct single-file input/output support (positional `INPUT OUTPUT` or `-i`/`-o`) with automatic target format
   inference from the output extension, plus batch directory processing.
 * `--jobs/--threads` scheduler, opt-in CSV/JSON reports (`--report`; disabled by default), per-stage timings, JSON

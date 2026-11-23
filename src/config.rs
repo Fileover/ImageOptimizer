@@ -2,6 +2,7 @@
 
 use crate::cli::{Cli, JpegModeArg, TargetFormat};
 use crate::errors::{Error, Result};
+use crate::image::resize::{ResizeFilter, ResizeSpec};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -37,6 +38,8 @@ pub struct FileConfig {
     pub zopfli: Option<bool>,
     pub zopfli_iterations: Option<u64>,
     pub zopfli_no_improvement: Option<u64>,
+    pub resize: Option<String>,
+    pub resize_filter: Option<ResizeFilter>,
     pub strip_metadata: Option<bool>,
     pub strip_icc: Option<bool>,
     pub jobs: Option<usize>,
@@ -71,6 +74,8 @@ pub struct Settings {
     pub zopfli: bool,
     pub zopfli_iterations: u64,
     pub zopfli_no_improvement: Option<u64>,
+    pub resize: Option<ResizeSpec>,
+    pub resize_filter: ResizeFilter,
     pub strip_metadata: bool,
     pub strip_icc: bool,
     pub jobs: Option<usize>,
@@ -198,6 +203,11 @@ impl Settings {
         }
 
         let explicit_format = cli.format.or(file.format);
+        let resize = match cli.resize.as_deref().or(file.resize.as_deref()) {
+            Some(spec) => Some(spec.parse::<ResizeSpec>()?),
+            None => None,
+        };
+        let resize_filter = cli.resize_filter.or(file.resize_filter).unwrap_or_default();
 
         Ok(Settings {
             input,
@@ -219,6 +229,8 @@ impl Settings {
             zopfli_no_improvement: Some(
                 cli.zopfli_no_improvement.or(file.zopfli_no_improvement).unwrap_or(DEFAULT_ZOPFLI_NO_IMPROVEMENT),
             ),
+            resize,
+            resize_filter,
             strip_metadata: cli.strip_metadata || file.strip_metadata.unwrap_or(false),
             strip_icc: cli.strip_icc || file.strip_icc.unwrap_or(false),
             jobs,

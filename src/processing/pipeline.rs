@@ -7,7 +7,9 @@ use crate::config::{Mode, Settings};
 use crate::errors::{Error, Result};
 use crate::formats::{self, Ctx, Encoded, Verification};
 use crate::image::decoder::decode;
-use crate::image::identification::{identify, webp_is_lossless, Format};
+use crate::image::identification::{identify, peek_display_dimensions, webp_is_lossless, Format};
+use crate::image::metadata::set_exif_orientation;
+use crate::image::resize::{apply_orientation, resize_raster};
 use crate::utils::filesystem::{long_path, InputFile};
 use crate::utils::temporary_files::TempFile;
 use serde::Serialize;
@@ -273,14 +275,29 @@ fn run_file(
 
     if settings.dry_run {
         res.status = Status::DryRun;
-        res.codec_settings = format!("would convert {} -> {} ({})", src.name(), dst.name(), res.mode);
+        res.codec_settings = match settings.resize {
+            Some(spec) => format!("would convert {} -> {} ({}, downscale max {spec})", src.name(), dst.name(), res.mode),
+            None => format!("would convert {} -> {} ({})", src.name(), dst.name(), res.mode),
+        };
         return Ok(());
     }
 
     // ---- encode
     let mut decoded_raster = None;
     let mut meta = None;
-    let encoded = encode_route(&ctx, src, dst, &bytes, planned_lossless, cancel, res, &mut decoded_raster, &mut meta)?;
+    let mut resized = false;
+    let encoded = encode_route(
+        &ctx,
+        src,
+        dst,
+        &bytes,
+        planned_lossless,
+        cancel,
+        res,
+        &mut decoded_raster,
+        &mut meta,
+        &mut resized,
+    )?;
     check_cancel(cancel)?;
 
     res.mode = if encoded.lossless { "lossless" } else { "lossy" };
@@ -291,18 +308,26 @@ fn run_file(
     // ---- verify (before anything is written)
     if settings.verify {
         let t = Instant::now();
-        res.verification =
-            verify_route(&ctx, src, dst, &bytes, &encoded.bytes, decoded_raster.as_ref(), encoded.lossless)?;
+        res.verification = verify_route(
+            &ctx,
+            src,
+            dst,
+            &bytes,
+            &encoded.bytes,
+            decoded_raster.as_ref(),
+            encoded.lossless,
+            resized,
+        )?;
         res.timings.verify_ms = ms(t);
     } else {
         res.notes.push("verification disabled (--verify=false)".into());
     }
     check_cancel(cancel)?;
 
-    // ---- keep-original decision (only for same-format optimization)
+    // ---- keep-original decision (only for same-format optimization without resize)
     let mut payload: &[u8] = &encoded.bytes;
     res.status = Status::Written;
-    if src == dst && encoded.bytes.len() >= bytes.len() && !settings.keep_larger {
+    if !resized && src == dst && encoded.bytes.len() >= bytes.len() && !settings.keep_larger {
         payload = &bytes;
         res.status = Status::KeptOriginal;
         res.notes.push(format!(
@@ -311,7 +336,7 @@ fn run_file(
             bytes.len()
         ));
         res.verification = Verification::ByteIdentical;
-    } else if src != dst && encoded.bytes.len() >= bytes.len() {
+    } else if !resized && src != dst && encoded.bytes.len() >= bytes.len() {
         res.notes.push("converted file is larger than the source (format conversion was requested, so it was written)".into());
     }
 
@@ -345,36 +370,54 @@ fn encode_route(
     res: &mut FileResult,
     raster_out: &mut Option<crate::image::color::Raster>,
     meta_out: &mut Option<crate::image::metadata::Metadata>,
+    resized_out: &mut bool,
 ) -> Result<Encoded> {
-    // Routes that work on the compressed bitstream and never decode pixels.
-    match (src, dst) {
-        (Format::Png, Format::Png) => {
-            let t = Instant::now();
-            let e = formats::png::optimize(ctx, bytes)?;
-            res.timings.encode_ms = ms(t);
-            return Ok(e);
+    // Check if a resize is actually required before bypassing bitstream-only fast paths.
+    let needs_resize = match ctx.settings.resize {
+        Some(spec) => match peek_display_dimensions(bytes, src) {
+            Some((w, h)) => spec.target_dimensions(w, h).is_some(),
+            None => false, // formats without a fast-path decode anyway; corrupt headers fail in fast-path
+        },
+        None => false,
+    };
+
+    // Routes that work on the compressed bitstream and never decode pixels (skipped when downscaling).
+    if !needs_resize {
+        match (src, dst) {
+            (Format::Png, Format::Png) => {
+                let t = Instant::now();
+                let e = formats::png::optimize(ctx, bytes)?;
+                res.timings.encode_ms = ms(t);
+                return Ok(e);
+            }
+            (Format::Jpeg, Format::Jpeg) => {
+                let t = Instant::now();
+                let e = formats::jpeg::optimize(ctx, bytes)?;
+                res.timings.encode_ms = ms(t);
+                return Ok(e);
+            }
+            (Format::Jpeg, Format::JpegXl) if formats::jpegxl::should_transcode_jpeg(ctx) => {
+                let t = Instant::now();
+                let e = formats::jpegxl::transcode_jpeg(ctx, bytes)?;
+                res.timings.encode_ms = ms(t);
+                return Ok(e);
+            }
+            _ => {}
         }
-        (Format::Jpeg, Format::Jpeg) => {
-            let t = Instant::now();
-            let e = formats::jpeg::optimize(ctx, bytes)?;
-            res.timings.encode_ms = ms(t);
-            return Ok(e);
-        }
-        (Format::Jpeg, Format::JpegXl) if formats::jpegxl::should_transcode_jpeg(ctx) => {
-            let t = Instant::now();
-            let e = formats::jpegxl::transcode_jpeg(ctx, bytes)?;
-            res.timings.encode_ms = ms(t);
-            return Ok(e);
-        }
-        _ => {}
     }
 
     // Strict lossless guard rails before spending time on decoding.
     if dst == Format::Jpeg && ctx.strict_lossless() {
-        return Err(Error::LossyRequired(format!(
-            "{} -> JPEG requires lossy encoding (JPEG is a lossy codec); omit --lossless to encode with MozJPEG",
-            src.name()
-        )));
+        let msg = if src == Format::Jpeg && needs_resize {
+            "resizing a JPEG requires lossy re-encoding with MozJPEG; omit --lossless or choose --format png/webp/jxl"
+                .into()
+        } else {
+            format!(
+                "{} -> JPEG requires lossy encoding (JPEG is a lossy codec); omit --lossless to encode with MozJPEG",
+                src.name()
+            )
+        };
+        return Err(Error::LossyRequired(msg));
     }
     if src == Format::WebP && dst == Format::WebP && lossless && webp_is_lossless(bytes) == Some(false) {
         return Err(Error::LossyRequired(
@@ -385,23 +428,38 @@ fn encode_route(
 
     // ---- decode
     let t = Instant::now();
-    let dec = decode(bytes, src, &ctx.limits())?;
+    let mut dec = decode(bytes, src, &ctx.limits())?;
     res.timings.decode_ms = ms(t);
-    res.width = Some(dec.raster.width);
-    res.height = Some(dec.raster.height);
     check_cancel(cancel)?;
 
     let mut notes = Vec::new();
-    let src_is_lossy = src == Format::Jpeg || (src == Format::WebP && webp_is_lossless(bytes) == Some(false));
-    if src_is_lossy && lossless && dst != src {
-        notes.push(format!(
-            "source {} is lossy: output preserves its decoded pixels exactly, but does not restore quality that was already lost",
-            src.name()
-        ));
+    // ---- optional downscale-only resize
+    if let Some(spec) = ctx.settings.resize {
+        let orient = dec.metadata.orientation();
+        let (disp_w, disp_h) = if orient >= 5 {
+            (dec.raster.height, dec.raster.width)
+        } else {
+            (dec.raster.width, dec.raster.height)
+        };
+        if let Some((nw, nh)) = spec.target_dimensions(disp_w, disp_h) {
+            if orient >= 2 {
+                dec.raster = apply_orientation(&dec.raster, orient)?;
+                if let Some(exif) = dec.metadata.exif.as_mut() {
+                    set_exif_orientation(exif, 1);
+                }
+            }
+            dec.raster = resize_raster(&dec.raster, nw, nh, ctx.settings.resize_filter)?;
+            *resized_out = true;
+            notes.push(format!(
+                "resized from {disp_w}x{disp_h} to {nw}x{nh} ({})",
+                ctx.settings.resize_filter.as_str()
+            ));
+        }
     }
-    if !lossless && src_is_lossy {
-        notes.push("lossy re-encode of an already lossy source: generation loss applies".into());
-    }
+
+    res.width = Some(dec.raster.width);
+    res.height = Some(dec.raster.height);
+    check_cancel(cancel)?;
 
     let t = Instant::now();
     let mut enc = match dst {
@@ -412,12 +470,24 @@ fn encode_route(
         other => return Err(Error::Unsupported(format!("{} is not an output format", other.name()))),
     };
     res.timings.encode_ms = ms(t);
+
+    let src_is_lossy = src == Format::Jpeg || (src == Format::WebP && webp_is_lossless(bytes) == Some(false));
+    if src_is_lossy && enc.lossless && (dst != src || *resized_out) {
+        notes.push(format!(
+            "source {} is lossy: output preserves its decoded pixels exactly, but does not restore quality that was already lost",
+            src.name()
+        ));
+    }
+    if !enc.lossless && src_is_lossy {
+        notes.push("lossy re-encode of an already lossy source: generation loss applies".into());
+    }
     enc.notes.extend(notes);
     *raster_out = Some(dec.raster);
     *meta_out = Some(dec.metadata);
     Ok(enc)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn verify_route(
     ctx: &Ctx,
     src: Format,
@@ -426,17 +496,23 @@ fn verify_route(
     out: &[u8],
     raster: Option<&crate::image::color::Raster>,
     was_lossless: bool,
+    resized: bool,
 ) -> Result<Verification> {
-    match (src, dst) {
-        (Format::Png, Format::Png) => formats::png::verify_same(ctx, src_bytes, out),
-        (Format::Jpeg, Format::Jpeg) => formats::jpeg::verify_optimized(ctx, src_bytes, out, was_lossless),
-        (Format::Jpeg, Format::JpegXl) if formats::jpegxl::should_transcode_jpeg(ctx) => {
-            formats::jpegxl::verify_jpeg_reconstruction(ctx, src_bytes, out)
+    if !resized {
+        match (src, dst) {
+            (Format::Png, Format::Png) => return formats::png::verify_same(ctx, src_bytes, out),
+            (Format::Jpeg, Format::Jpeg) => return formats::jpeg::verify_optimized(ctx, src_bytes, out, was_lossless),
+            (Format::Jpeg, Format::JpegXl) if formats::jpegxl::should_transcode_jpeg(ctx) => {
+                return formats::jpegxl::verify_jpeg_reconstruction(ctx, src_bytes, out)
+            }
+            _ => {}
         }
-        (_, Format::JpegXl) => formats::jpegxl::verify_pixels(ctx, need(raster)?, out, was_lossless),
-        (_, Format::WebP) => formats::webp::verify(ctx, need(raster)?, out, was_lossless),
-        (_, Format::Png) => formats::png::verify_raster(ctx, need(raster)?, out),
-        (_, Format::Jpeg) => formats::jpeg::verify_decodable(ctx, raster, out),
+    }
+    match dst {
+        Format::JpegXl => formats::jpegxl::verify_pixels(ctx, need(raster)?, out, was_lossless),
+        Format::WebP => formats::webp::verify(ctx, need(raster)?, out, was_lossless),
+        Format::Png => formats::png::verify_raster(ctx, need(raster)?, out),
+        Format::Jpeg => formats::jpeg::verify_decodable(ctx, raster, out),
         _ => Ok(Verification::NotRun),
     }
 }

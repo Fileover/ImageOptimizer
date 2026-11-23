@@ -1,6 +1,7 @@
 //! Command line interface. Every option is optional here: values are merged with an optional
 //! JSON configuration file and the built-in defaults in `config::Settings::resolve`.
 
+use crate::image::resize::ResizeFilter;
 use clap::{ArgAction, Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -38,7 +39,7 @@ pub enum JpegModeArg {
     about = "Optimize and convert images with libjxl, libwebp, jpegoptim (MozJPEG) and OxiPNG (Zopfli) in one executable.",
     long_about = "Optimize and convert images with libjxl (cjxl), libwebp (cwebp), jpegoptim (MozJPEG) and OxiPNG (Zopfli) in one executable.\n\nAccepts either a single input/output file pair (inferring the target format from the output extension when --format is omitted) or an input/output directory. By default each codec follows its upstream tool's default mode (lossy for WebP, non-JPEG->JXL and non-JPEG->JPEG; lossless for PNG, JPEG->JPEG and JPEG->JXL), tuned for maximum compression effort. Pass --lossless for strict mathematically lossless output across all codecs. Source files are never modified.",
     disable_version_flag = true,
-    after_help = "EXAMPLES:\n  ImageOptimizer photo.png photo.webp\n  ImageOptimizer photo.png photo.jxl --lossless\n  ImageOptimizer -i photo.png -o photo.jpg -q 85\n  ImageOptimizer --input D:\\Images --format jxl --output D:\\Output\n  ImageOptimizer --input D:\\Images --format original --lossless --recursive --output D:\\Output"
+    after_help = "EXAMPLES:\n  ImageOptimizer photo.png photo.webp\n  ImageOptimizer photo.png photo.jxl --lossless\n  ImageOptimizer photo.png thumb.webp --resize 256x256\n  ImageOptimizer -i photo.png -o photo.jpg -q 85\n  ImageOptimizer --input D:\\Images --format jxl --output D:\\Output\n  ImageOptimizer --input D:\\Images --format original --lossless --recursive --output D:\\Output"
 )]
 pub struct Cli {
     /// Input file or directory (positional shorthand for --input)
@@ -101,6 +102,13 @@ pub struct Cli {
     /// Stop Zopfli after N iterations without improvement
     #[arg(long, value_name = "N")]
     pub zopfli_no_improvement: Option<u64>,
+
+    /// Downscale only to fit within WxH (e.g. 256x256, 256x, x256, 256x256!); never upscales
+    #[arg(long, value_name = "WxH")]
+    pub resize: Option<String>,
+    /// Resampling filter used when downscaling (default: lanczos3)
+    #[arg(long, value_enum)]
+    pub resize_filter: Option<ResizeFilter>,
 
     /// Remove EXIF, XMP, IPTC and comments (ICC profiles are kept)
     #[arg(long)]
