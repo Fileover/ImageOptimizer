@@ -9,5 +9,8 @@
   vs progressive comparison), `--sharp-yuv` for lossy WebP, and `--optimize-alpha` for PNG.
 * Metadata preserved by default across all codecs (`--strip-metadata` / `--strip-icc`); magic-byte detection;
   verification matrix; atomic writes.
-* `--jobs/--threads` scheduler, CSV/JSON reports, per-stage timings, JSON config, tracing logs.
+* Direct single-file input/output support (positional `INPUT OUTPUT` or `-i`/`-o`) with automatic target format
+  inference from the output extension, plus batch directory processing.
+* `--jobs/--threads` scheduler, opt-in CSV/JSON reports (`--report`; disabled by default), per-stage timings, JSON
+  config, tracing logs.
 * PowerShell 7 build/verify scripts and GitHub Actions CI workflow (Windows x64 static release build + Linux test suite).

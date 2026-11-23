@@ -4,7 +4,7 @@ mod common;
 use common::*;
 use image_optimizer::engines::{libjxl, libwebp};
 use image_optimizer::image::encoder::write_png;
-use image_optimizer::image::identification::webp_is_lossless;
+use image_optimizer::image::identification::{identify, webp_is_lossless, Format};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -81,11 +81,96 @@ fn base<'a>(f: &'a Fixture, extra: &[&'a str]) -> Vec<&'a str> {
 }
 
 #[test]
+fn single_file_positional_infers_format_and_creates_no_reports() {
+    let f = fixture_dir();
+    let src_png = f.input.join("a.png");
+    let src_jpg = f.input.join("b.jpg");
+    let work = f.output.clone();
+    std::fs::create_dir_all(&work).unwrap();
+
+    // PNG -> WebP (positional, inferred format)
+    let out_webp = work.join("photo.webp");
+    let o = run(&[src_png.to_str().unwrap(), out_webp.to_str().unwrap()]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    assert!(out_webp.is_file());
+    let webp_bytes = std::fs::read(&out_webp).unwrap();
+    assert_eq!(identify(&webp_bytes), Some(Format::WebP));
+    assert_eq!(webp_is_lossless(&webp_bytes), Some(false));
+    assert!(!work.join("Reports").exists(), "single-file mode must not create Reports/");
+    assert!(!work.join("WebP").exists(), "single-file mode must not create format subfolder");
+
+    // PNG -> JXL lossless into nested subdir (creates parent dir automatically)
+    let out_jxl = work.join("nested").join("photo.jxl");
+    let o = run(&[src_png.to_str().unwrap(), out_jxl.to_str().unwrap(), "--lossless", "--effort", "3"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    assert_eq!(identify(&std::fs::read(&out_jxl).unwrap()), Some(Format::JpegXl));
+    assert!(!work.join("nested").join("Reports").exists());
+
+    // JPEG -> JXL (lossless JPEG transcode by default)
+    let out_jxl_jpg = work.join("from_jpg.jxl");
+    let o = run(&[src_jpg.to_str().unwrap(), out_jxl_jpg.to_str().unwrap(), "--effort", "3"]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    let rebuilt = libjxl::decode_jpeg(&std::fs::read(&out_jxl_jpg).unwrap(), 1).unwrap();
+    assert_eq!(rebuilt, Some(std::fs::read(&src_jpg).unwrap()));
+
+    // PNG -> JPEG and PNG -> PNG
+    let out_jpg = work.join("photo.jpg");
+    assert_eq!(run(&[src_png.to_str().unwrap(), out_jpg.to_str().unwrap()]).status.code(), Some(0));
+    assert_eq!(identify(&std::fs::read(&out_jpg).unwrap()), Some(Format::Jpeg));
+
+    let out_png = work.join("photo.png");
+    assert_eq!(
+        run(&[src_png.to_str().unwrap(), out_png.to_str().unwrap(), "--no-zopfli", "--png-preset", "1"]).status.code(),
+        Some(0)
+    );
+    assert_eq!(identify(&std::fs::read(&out_png).unwrap()), Some(Format::Png));
+    assert!(!work.join("Reports").exists());
+}
+
+#[test]
+fn single_file_flags_and_relative_cwd_paths_work() {
+    let f = fixture_dir();
+    let o = bin()
+        .current_dir(&f.input)
+        .args(["-i", "a.png", "-o", "converted.webp"])
+        .output()
+        .expect("executable runs");
+    assert_eq!(o.status.code(), Some(0), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    assert!(f.input.join("converted.webp").is_file());
+    assert!(!f.input.join("Reports").exists());
+}
+
+#[test]
+fn single_file_edge_cases_unknown_extension_overwrite_and_same_source() {
+    let f = fixture_dir();
+    let src = f.input.join("a.png");
+    let orig_bytes = std::fs::read(&src).unwrap();
+
+    // Unknown output extension without --format is rejected (exit code 2).
+    let bad = f.output.join("photo.xyz");
+    assert_eq!(run(&[src.to_str().unwrap(), bad.to_str().unwrap()]).status.code(), Some(2));
+    assert!(!bad.exists());
+
+    // Output path equal to source path is refused (exit code 1) and source stays untouched.
+    assert_eq!(run(&[src.to_str().unwrap(), src.to_str().unwrap()]).status.code(), Some(1));
+    assert_eq!(std::fs::read(&src).unwrap(), orig_bytes);
+
+    // Existing output file is not overwritten without --overwrite.
+    std::fs::create_dir_all(&f.output).unwrap();
+    let dst = f.output.join("out.webp");
+    std::fs::write(&dst, b"sentinel").unwrap();
+    assert_eq!(run(&[src.to_str().unwrap(), dst.to_str().unwrap()]).status.code(), Some(0));
+    assert_eq!(std::fs::read(&dst).unwrap(), b"sentinel");
+    assert_eq!(run(&[src.to_str().unwrap(), dst.to_str().unwrap(), "--overwrite"]).status.code(), Some(0));
+    assert_eq!(identify(&std::fs::read(&dst).unwrap()), Some(Format::WebP));
+}
+
+#[test]
 fn every_target_format_works_in_default_and_lossless_modes_without_modifying_sources() {
     for fmt in ["jxl", "webp", "jpeg", "png", "original"] {
         let f = fixture_dir();
         let before = snapshot(&f.input);
-        let o = run(&base(&f, &["--format", fmt, "--recursive", "--no-zopfli", "--png-preset", "1", "--effort", "3"]));
+        let o = run(&base(&f, &["--format", fmt, "--recursive", "--no-zopfli", "--png-preset", "1", "--effort", "3", "--report"]));
         assert_eq!(o.status.code(), Some(0), "{fmt}: {}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
         assert_eq!(before, snapshot(&f.input), "{fmt}: source files must be untouched");
         assert!(f.output.join("Reports/report.csv").exists());
@@ -106,15 +191,16 @@ fn every_target_format_works_in_default_and_lossless_modes_without_modifying_sou
 
 #[test]
 fn default_mode_follows_upstream_codec_defaults() {
-    // 1. --format webp -> cwebp default (lossy VP8, q=75)
+    // 1. --format webp -> cwebp default (lossy VP8, q=75), no Reports/ by default
     let f = fixture_dir();
     assert_eq!(run(&base(&f, &["--format", "webp"])).status.code(), Some(0));
     let out_webp = std::fs::read(f.output.join("WebP/a.webp")).unwrap();
     assert_eq!(webp_is_lossless(&out_webp), Some(false), "cwebp default is lossy");
+    assert!(!f.output.join("Reports").exists(), "Reports/ must not be created without --report");
 
     // 2. --format jxl -> cjxl default: PNG is lossy (d=1.0), JPEG is lossless transcode
     let f = fixture_dir();
-    assert_eq!(run(&base(&f, &["--format", "jxl", "--effort", "3"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "jxl", "--effort", "3", "--report"])).status.code(), Some(0));
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(f.output.join("Reports/report.json")).unwrap()).unwrap();
     let files = json["files"].as_array().unwrap();
@@ -127,7 +213,7 @@ fn default_mode_follows_upstream_codec_defaults() {
 
     // 3. --format jpeg -> PNG converts with MozJPEG (no --lossy needed), JPEG optimizes losslessly
     let f = fixture_dir();
-    assert_eq!(run(&base(&f, &["--format", "jpeg"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "jpeg", "--report"])).status.code(), Some(0));
     assert!(f.output.join("JPEG/a.jpg").exists(), "PNG -> JPEG works by default");
     assert!(f.output.join("JPEG/b.jpg").exists());
     let json: serde_json::Value =
@@ -152,12 +238,14 @@ fn output_layout_has_one_folder_per_format_and_keeps_subdirectories() {
     assert_eq!(run(&base(&f, &["--format", "jxl", "--recursive", "--effort", "3"])).status.code(), Some(0));
     assert!(f.output.join("JPEG-XL/a.jxl").exists());
     assert!(f.output.join("JPEG-XL/sub/c.jxl").exists());
+    assert!(!f.output.join("Reports").exists());
     let f = fixture_dir();
     assert_eq!(run(&base(&f, &["--format", "original", "--recursive", "--no-zopfli", "--effort", "3"])).status.code(), Some(0));
     assert!(f.output.join("PNG/a.png").exists());
     assert!(f.output.join("JPEG/sub/c.jpeg").exists());
     assert!(f.output.join("WebP/d.webp").exists());
     assert!(f.output.join("JPEG-XL/e.jxl").exists());
+    assert!(!f.output.join("Reports").exists());
 }
 
 #[test]
@@ -213,7 +301,7 @@ fn corrupt_file_fails_alone_and_sets_exit_code_1() {
     let f = fixture_dir();
     let good = fixture("baseline_plain.jpg");
     std::fs::write(f.input.join("broken.jpg"), &good[..good.len() / 2]).unwrap();
-    let o = run(&base(&f, &["--format", "original", "--no-zopfli", "--effort", "3"]));
+    let o = run(&base(&f, &["--format", "original", "--no-zopfli", "--effort", "3", "--report"]));
     assert_eq!(o.status.code(), Some(1));
     assert!(f.output.join("PNG/a.png").exists(), "other files are still processed");
     assert!(!f.output.join("JPEG/broken.jpg").exists(), "no partial output for the broken file");
@@ -226,7 +314,7 @@ fn corrupt_file_fails_alone_and_sets_exit_code_1() {
 #[test]
 fn lossless_flag_refuses_lossy_conversions_with_a_clear_reason() {
     let f = fixture_dir();
-    let o = run(&base(&f, &["--format", "jpeg", "--lossless", "--no-zopfli"]));
+    let o = run(&base(&f, &["--format", "jpeg", "--lossless", "--no-zopfli", "--report"]));
     assert_eq!(o.status.code(), Some(0));
     assert!(!f.output.join("JPEG/a.jpg").exists(), "PNG -> JPEG is refused under --lossless");
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(f.output.join("Reports/report.json")).unwrap()).unwrap();
@@ -250,7 +338,7 @@ fn quality_and_distance_work_without_lossy_and_conflict_with_lossless() {
 #[test]
 fn explicit_lossy_forces_lossy_on_jpeg_and_is_reported() {
     let f = fixture_dir();
-    assert_eq!(run(&base(&f, &["--format", "jpeg", "--lossy", "--quality", "55", "--recursive"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "jpeg", "--lossy", "--quality", "55", "--recursive", "--report"])).status.code(), Some(0));
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(f.output.join("Reports/report.json")).unwrap()).unwrap();
     assert!(json["files"].as_array().unwrap().iter().all(|x| x["mode"] == "lossy"));
     assert!(json["files"].as_array().unwrap().iter().any(|x| x["verification"] == "decodable-lossy-not-compared"));
@@ -263,7 +351,17 @@ fn larger_results_are_not_written_unless_keep_larger() {
     assert_eq!(run(&base(&f, &["--format", "original", "--no-zopfli", "--recursive", "--effort", "3"])).status.code(), Some(0));
     let optimized = f.output.join("PNG/a.png");
     let out2 = f.output.parent().unwrap().join("out2");
-    let o = run(&["--input", optimized.to_str().unwrap(), "--output", out2.to_str().unwrap(), "--format", "original", "--no-zopfli", "--quiet"]);
+    let o = run(&[
+        "--input",
+        optimized.to_str().unwrap(),
+        "--output",
+        out2.to_str().unwrap(),
+        "--format",
+        "original",
+        "--no-zopfli",
+        "--quiet",
+        "--report",
+    ]);
     assert_eq!(o.status.code(), Some(0));
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(out2.join("Reports/report.json")).unwrap()).unwrap();
     let r = &json["files"][0];
@@ -276,7 +374,7 @@ fn larger_results_are_not_written_unless_keep_larger() {
 #[test]
 fn jobs_and_threads_are_accepted_and_reported() {
     let f = fixture_dir();
-    assert_eq!(run(&base(&f, &["--format", "webp", "--jobs", "2", "--threads", "1", "--recursive"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "webp", "--jobs", "2", "--threads", "1", "--recursive", "--report"])).status.code(), Some(0));
     let json: serde_json::Value = serde_json::from_slice(&std::fs::read(f.output.join("Reports/report.json")).unwrap()).unwrap();
     assert_eq!(json["run"]["jobs"], 2);
     assert_eq!(json["run"]["threads"], 1);
@@ -284,9 +382,12 @@ fn jobs_and_threads_are_accepted_and_reported() {
 }
 
 #[test]
-fn reports_have_per_stage_timings_and_csv_header() {
+fn reports_are_opt_in_and_have_per_stage_timings_and_csv_header() {
     let f = fixture_dir();
     assert_eq!(run(&base(&f, &["--format", "png", "--no-zopfli"])).status.code(), Some(0));
+    assert!(!f.output.join("Reports").exists(), "Reports/ must not be created by default");
+
+    assert_eq!(run(&base(&f, &["--format", "png", "--no-zopfli", "--overwrite", "--report"])).status.code(), Some(0));
     let csv = std::fs::read_to_string(f.output.join("Reports/report.csv")).unwrap();
     let header = csv.lines().next().unwrap();
     for col in ["source", "status", "source_bytes", "output_bytes", "saved_percent", "verification", "load_ms", "decode_ms", "encode_ms", "verify_ms", "write_ms", "total_ms"] {

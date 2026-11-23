@@ -15,8 +15,11 @@ redistributable (static CRT).
 * **First-class `--lossless` mode.** Add `--lossless` to enforce strict mathematically lossless encoding/transcoding
   across every codec, with automatic pixel/DCT/bitstream verification and guard rails that refuse inherently lossy
   routes instead of silently downgrading them.
-* **Sources are never modified.** Outputs go to `<output>/<Format>/…` (`PNG`, `JPEG`, `WebP`, `JPEG-XL`), written
-  to a temporary file and renamed only after verification. Existing outputs are kept unless `--overwrite`.
+* **Single file or folder.** Pass a direct input/output file pair (`ImageOptimizer photo.png photo.webp` or
+  `-i photo.png -o photo.jxl`) to write straight to the target path (format inferred from extension, no extra folders or
+  `Reports/` created), or pass directories for parallel batch processing (`<output>/<Format>/…`).
+* **Sources are never modified.** Outputs are written to a temporary file and renamed only after verification.
+  Existing outputs are kept unless `--overwrite`. No `Reports/` folder is created unless `--report` is requested.
 * **Metadata is preserved by default** (EXIF incl. orientation, ICC, XMP). `--strip-metadata` removes EXIF/XMP/IPTC/
   comments (ICC stays); `--strip-icc` also removes ICC.
 * **Detection by file signature**, not extension: PNG (incl. APNG), JPEG, WebP, JPEG XL, BMP, TIFF, GIF.
@@ -26,21 +29,22 @@ redistributable (static CRT).
 ## Quick start
 
 ```powershell
-# Upstream defaults + maximum compression effort:
-ImageOptimizer --input D:\Images --format jxl      --output D:\Output   # cjxl: lossless JPEG transcode, d=1.0 for others
-ImageOptimizer --input D:\Images --format webp     --output D:\Output   # cwebp: lossy q=75, method 6
-ImageOptimizer --input D:\Images --format webp -q 85 --output D:\Output # custom quality (no --lossy needed)
-ImageOptimizer --input D:\Images --format jpeg     --output D:\Output   # jpegoptim lossless for JPEGs, MozJPEG q=75 for others
-ImageOptimizer --input D:\Images --format png      --output D:\Output   # OxiPNG preset 6 + Zopfli
+# Single file -> single file (format inferred from output extension, no Reports/ created):
+ImageOptimizer photo.png photo.webp                     # cwebp: lossy q=75, method 6
+ImageOptimizer photo.png photo.webp -q 85               # custom quality (no --lossy needed)
+ImageOptimizer photo.png photo.jxl --lossless           # libjxl lossless, effort 10
+ImageOptimizer photo.jpg photo.jxl                      # cjxl lossless JPEG transcode, effort 10
+ImageOptimizer -i photo.png -o photo.jpg                # MozJPEG q=75, progressive, trellis
+ImageOptimizer photo.png optimized.png                  # OxiPNG preset 6 + Zopfli
 
-# Strict mathematically lossless across every format:
+# Batch directory processing:
+ImageOptimizer --input D:\Images --format jxl      --output D:\Output
+ImageOptimizer --input D:\Images --format webp     --output D:\Output
 ImageOptimizer --input D:\Images --format original --lossless --recursive --output D:\Output
-ImageOptimizer --input D:\Images --format jxl      --lossless --output D:\Output
-ImageOptimizer --input D:\Images --format webp     --lossless --output D:\Output
 
 # Force lossy recompression even on JPEG -> JPEG / JPEG -> JXL:
-ImageOptimizer --input D:\Images --format jpeg --lossy --quality 80 --output D:\Output
-ImageOptimizer --input D:\Images --format jxl  --lossy --distance 1.5 --output D:\Output
+ImageOptimizer photo.jpg smaller.jpg --quality 80
+ImageOptimizer photo.jpg smaller.jxl --lossy --distance 1.5
 ```
 
 ## What happens per route
@@ -76,8 +80,9 @@ Run `ImageOptimizer --help`. Highlights:
   the smaller file), `--png-preset` (0–6, default 6), `--optimize-alpha` (OxiPNG `-a`), `--no-zopfli`,
   `--zopfli-iterations` (default 60), `--zopfli-no-improvement` (default 15).
 * **Execution & safety:** `--jobs N` (files in parallel) × `--threads N` (threads per file) planned together against
-  logical CPUs and available RAM; `--recursive`, `--overwrite`, `--dry-run`, `--keep-larger`, `--max-pixels`,
-  `--strip-metadata`, `--strip-icc`, `--verify=false`, `--config file.json` (CLI wins), `-v/-vv`, `--version`.
+  logical CPUs and available RAM; `--recursive`, `--overwrite`, `--dry-run`, `--keep-larger`, `--report`,
+  `--max-pixels`, `--strip-metadata`, `--strip-icc`, `--verify=false`, `--config file.json` (CLI wins), `-v/-vv`,
+  `--version`.
 
 `--config` example (every key mirrors an option, unknown keys are rejected):
 
@@ -87,8 +92,9 @@ Run `ImageOptimizer --help`. Highlights:
 
 Exit codes: `0` ok · `1` at least one file failed · `2` invalid arguments/configuration · `130` cancelled (Ctrl+C).
 
-## Reports
+## Reports (optional)
 
+No `Reports/` folder is created by default. Pass `--report` (or `"report": true` in `--config`) to write
 `<output>/Reports/report.csv` and `report.json`: per-file status, effective mode (`lossless`/`lossy`), formats, sizes,
 saved bytes/%, dimensions, verification result, codec settings, notes/errors and per-stage timings (load, decode,
 encode, verify, write, total).

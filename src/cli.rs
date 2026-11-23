@@ -36,18 +36,25 @@ pub enum JpegModeArg {
 #[command(
     name = "ImageOptimizer",
     about = "Optimize and convert images with libjxl, libwebp, jpegoptim (MozJPEG) and OxiPNG (Zopfli) in one executable.",
-    long_about = "Optimize and convert images with libjxl (cjxl), libwebp (cwebp), jpegoptim (MozJPEG) and OxiPNG (Zopfli) in one executable.\n\nBy default each codec follows its upstream tool's default mode (lossy for WebP, non-JPEG->JXL and non-JPEG->JPEG; lossless for PNG, JPEG->JPEG and JPEG->JXL), tuned for maximum compression effort. Pass --lossless for strict mathematically lossless output across all codecs. Source files are never modified.",
+    long_about = "Optimize and convert images with libjxl (cjxl), libwebp (cwebp), jpegoptim (MozJPEG) and OxiPNG (Zopfli) in one executable.\n\nAccepts either a single input/output file pair (inferring the target format from the output extension when --format is omitted) or an input/output directory. By default each codec follows its upstream tool's default mode (lossy for WebP, non-JPEG->JXL and non-JPEG->JPEG; lossless for PNG, JPEG->JPEG and JPEG->JXL), tuned for maximum compression effort. Pass --lossless for strict mathematically lossless output across all codecs. Source files are never modified.",
     disable_version_flag = true,
-    after_help = "EXAMPLES:\n  ImageOptimizer --input D:\\Images --format jxl --output D:\\Output\n  ImageOptimizer --input D:\\Images --format webp --quality 80 --output D:\\Output\n  ImageOptimizer --input D:\\Images --format jpeg --output D:\\Output\n  ImageOptimizer --input D:\\Images --format original --lossless --recursive --output D:\\Output"
+    after_help = "EXAMPLES:\n  ImageOptimizer photo.png photo.webp\n  ImageOptimizer photo.png photo.jxl --lossless\n  ImageOptimizer -i photo.png -o photo.jpg -q 85\n  ImageOptimizer --input D:\\Images --format jxl --output D:\\Output\n  ImageOptimizer --input D:\\Images --format original --lossless --recursive --output D:\\Output"
 )]
 pub struct Cli {
+    /// Input file or directory (positional shorthand for --input)
+    #[arg(value_name = "INPUT", conflicts_with = "input")]
+    pub input_pos: Option<PathBuf>,
+    /// Output file or directory (positional shorthand for --output)
+    #[arg(value_name = "OUTPUT", conflicts_with = "output")]
+    pub output_pos: Option<PathBuf>,
+
     /// Input file or directory
     #[arg(short, long, value_name = "PATH")]
     pub input: Option<PathBuf>,
-    /// Output directory (created if missing)
-    #[arg(short, long, value_name = "DIR")]
+    /// Output file (for a single input file) or directory
+    #[arg(short, long, value_name = "PATH")]
     pub output: Option<PathBuf>,
-    /// Target format
+    /// Target format (inferred from the output file extension in single-file mode; default: original for directories)
     #[arg(short, long, value_enum)]
     pub format: Option<TargetFormat>,
 
@@ -121,8 +128,11 @@ pub struct Cli {
     /// Write optimized output even when it is not smaller than the source
     #[arg(long)]
     pub keep_larger: bool,
+    /// Write Reports/report.csv and report.json (disabled by default)
+    #[arg(long)]
+    pub report: bool,
     /// Verify every result (default: on). Use --verify=false to disable.
-    #[arg(long, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true", value_name = "BOOL")]
+    #[arg(long, action = ArgAction::Set, num_args = 0..=1, require_equals = true, default_missing_value = "true", value_name = "BOOL")]
     pub verify: Option<bool>,
     /// Refuse images with more pixels than this (default 268435456)
     #[arg(long, value_name = "N")]

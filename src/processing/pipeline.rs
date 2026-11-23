@@ -256,6 +256,12 @@ fn run_file(
 
     let dest = dest_for(src, dst);
     res.output = Some(dest.clone());
+    let dest_lp = long_path(&dest);
+
+    // Defensive: never replace the source itself.
+    if same_file(&dest_lp, &input.path) {
+        return Err(Error::Invalid("output path equals the source path; refusing to overwrite the source".into()));
+    }
 
     if dest.exists() && !settings.overwrite {
         res.output = Some(dest.clone());
@@ -311,13 +317,8 @@ fn run_file(
 
     // ---- write
     let t = Instant::now();
-    if let Some(dir) = dest.parent() {
+    if let Some(dir) = dest.parent().filter(|d| !d.as_os_str().is_empty()) {
         std::fs::create_dir_all(long_path(dir)).map_err(|e| Error::io(dir, e))?;
-    }
-    let dest_lp = long_path(&dest);
-    // Defensive: never replace the source itself.
-    if same_file(&dest_lp, &input.path) {
-        return Err(Error::Invalid("output path equals the source path; refusing to overwrite the source".into()));
     }
     let tmp = TempFile::write_next_to(&dest_lp, payload)?;
     tmp.persist(&dest_lp, settings.overwrite)?;

@@ -1,6 +1,6 @@
-//! Application driver: configuration, discovery, scheduling, progress, reports, exit codes.
+//! Application driver: configuration, discovery, scheduling, progress, optional reports, exit codes.
 
-use crate::cli::Cli;
+use crate::cli::{Cli, TargetFormat};
 use crate::config::{Mode, Settings};
 use crate::engines::{libjxl, libwebp, mozjpeg, oxipng};
 use crate::errors::{Error, Result};
@@ -15,7 +15,7 @@ use crate::utils::formatting::{hms, human_bytes};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -57,8 +57,32 @@ struct Job {
     dest: PathBuf,
 }
 
+/// Maps a recognized output file extension to a [`TargetFormat`].
+fn target_format_from_extension(p: &Path) -> Option<TargetFormat> {
+    match p.extension()?.to_string_lossy().to_lowercase().as_str() {
+        "png" => Some(TargetFormat::Png),
+        "jpg" | "jpeg" | "jpe" | "jfif" => Some(TargetFormat::Jpeg),
+        "webp" => Some(TargetFormat::Webp),
+        "jxl" => Some(TargetFormat::Jxl),
+        _ => None,
+    }
+}
+
+/// True when `--input` is a single file and `--output` designates an exact output file path
+/// (rather than an output directory).
+fn is_single_file_output(input: &Path, output: &Path) -> bool {
+    if !input.is_file() || output.is_dir() {
+        return false;
+    }
+    let raw = output.to_string_lossy();
+    if raw.ends_with('/') || raw.ends_with('\\') {
+        return false;
+    }
+    output.is_file() || output.extension().is_some()
+}
+
 /// Reads up to 32 bytes and identifies the format by signature.
-fn sniff(p: &std::path::Path) -> Option<Format> {
+fn sniff(p: &Path) -> Option<Format> {
     let mut f = std::fs::File::open(long_path(p)).ok()?;
     let mut buf = [0u8; 32];
     let mut n = 0;
@@ -98,15 +122,42 @@ pub fn run(cli: &Cli) -> i32 {
     }
 }
 
-fn execute(settings: Settings) -> Result<i32> {
+fn execute(mut settings: Settings) -> Result<i32> {
     let started = Instant::now();
     let started_unix = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
 
     if !settings.input.exists() {
         return Err(Error::Invalid(format!("input does not exist: {}", settings.input.display())));
     }
+    let single_file = settings.input.is_file();
+    if !single_file && settings.output.is_file() {
+        return Err(Error::Invalid(format!(
+            "input is a directory, so --output must be a directory (got existing file: {})",
+            settings.output.display()
+        )));
+    }
+    let single_file_output = is_single_file_output(&settings.input, &settings.output);
+
+    if single_file_output && !settings.format_explicit {
+        if let Some(inferred) = target_format_from_extension(&settings.output) {
+            settings.format = inferred;
+        } else if let Some(ext) = settings.output.extension() {
+            return Err(Error::Invalid(format!(
+                "unsupported output format extension '.{}' in {} (supported: .png, .jpg, .jpeg, .webp, .jxl; or pass --format)",
+                ext.to_string_lossy(),
+                settings.output.display()
+            )));
+        }
+    }
+
     if !settings.dry_run {
-        std::fs::create_dir_all(long_path(&settings.output)).map_err(|e| Error::io(&settings.output, e))?;
+        if single_file_output {
+            if let Some(parent) = settings.output.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(long_path(parent)).map_err(|e| Error::io(parent, e))?;
+            }
+        } else {
+            std::fs::create_dir_all(long_path(&settings.output)).map_err(|e| Error::io(&settings.output, e))?;
+        }
     }
 
     // ---- discovery
@@ -115,30 +166,34 @@ fn execute(settings: Settings) -> Result<i32> {
     let mut planner = OutputPlanner::default();
     let mut jobs_list = Vec::new();
     let mut ignored = 0usize;
-    let single_file = settings.input.is_file();
     for c in candidates {
-        // Files without an image signature are ignored silently, except when named explicitly.
+        // Files without an image signature are ignored silently in directories, but reported when named explicitly.
         let Some(src) = sniff(&c.path) else {
             if single_file {
-                jobs_list.push(Job { dest: PathBuf::new(), input: c });
+                let dest = if single_file_output { settings.output.clone() } else { PathBuf::new() };
+                jobs_list.push(Job { dest, input: c });
             } else {
                 tracing::debug!("ignored (no image signature): {}", c.path.display());
                 ignored += 1;
             }
             continue;
         };
-        let dst = resolve_target(&settings, src).unwrap_or(src);
-        let dir = settings.output.join(dst.output_dir()).join(&c.rel_dir);
-        let ext = if src == dst {
-            c.path
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .filter(|e| !e.is_empty())
-                .unwrap_or_else(|| dst.extension().to_string())
+        let dest = if single_file_output {
+            settings.output.clone()
         } else {
-            dst.extension().to_string()
+            let dst = resolve_target(&settings, src).unwrap_or(src);
+            let dir = settings.output.join(dst.output_dir()).join(&c.rel_dir);
+            let ext = if src == dst {
+                c.path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase())
+                    .filter(|e| !e.is_empty())
+                    .unwrap_or_else(|| dst.extension().to_string())
+            } else {
+                dst.extension().to_string()
+            };
+            planner.plan(&dir, &c.path, &ext)
         };
-        let dest = planner.plan(&dir, &c.path, &ext);
         jobs_list.push(Job { input: c, dest });
     }
     tracing::info!("{} candidate files, {} image jobs, {} ignored", total_candidates, jobs_list.len(), ignored);
@@ -159,7 +214,7 @@ fn execute(settings: Settings) -> Result<i32> {
             plan.cpus
         );
     }
-    if !settings.quiet {
+    if !settings.quiet && !single_file_output {
         println!(
             "{APP_NAME} {APP_VERSION} | mode: {} | format: {:?} | {} files | jobs: {} x threads: {} ({} logical CPUs){}",
             match settings.mode {
@@ -235,13 +290,24 @@ fn execute(settings: Settings) -> Result<i32> {
     };
 
     let mut report_paths = None;
-    if !settings.dry_run {
-        match reporting::write_reports(&settings.output, &results, &info, &summary) {
+    if settings.report && !settings.dry_run {
+        let report_root = if single_file_output {
+            settings
+                .output
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or_else(|| Path::new("."))
+        } else {
+            settings.output.as_path()
+        };
+        match reporting::write_reports(report_root, &results, &info, &summary) {
             Ok(p) => report_paths = Some(p),
             Err(e) => eprintln!("warning: could not write reports: {e}"),
         }
     }
-    print_summary(&settings, &summary, wall_ms, ignored, report_paths.as_ref().map(|p| (&p.0, &p.1)));
+    if !settings.quiet && !single_file_output {
+        print_summary(&settings, &summary, wall_ms, ignored, report_paths.as_ref().map(|p| (&p.0, &p.1)));
+    }
 
     if cancel.load(Ordering::Relaxed) {
         return Ok(EXIT_CANCELLED);

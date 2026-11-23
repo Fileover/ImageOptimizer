@@ -18,7 +18,10 @@ pub struct TempFile {
 impl TempFile {
     /// Writes `data` to a fresh temporary file in the directory of `dest` and flushes it to disk.
     pub fn write_next_to(dest: &Path, data: &[u8]) -> Result<Self> {
-        let dir = dest.parent().unwrap_or_else(|| Path::new("."));
+        let dir = dest
+            .parent()
+            .filter(|d| !d.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
         let name = dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let n = COUNTER.fetch_add(1, Ordering::Relaxed);
         let tmp = dir.join(format!(".{name}.imgopt-{}-{n}.tmp", std::process::id()));

@@ -115,32 +115,40 @@ function Write-TestBmp([string]$Path, [int]$Width, [int]$Height) {
 }
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ("imgopt-verify-" + [guid]::NewGuid().ToString('N'))
-$seed = Join-Path $work 'seed'; $in = Join-Path $work 'in'; $outRoot = Join-Path $work 'out'
-New-Item -ItemType Directory -Force -Path $seed, $in | Out-Null
+$seed = Join-Path $work 'seed'; $in = Join-Path $work 'in'; $single = Join-Path $work 'single'; $outRoot = Join-Path $work 'out'
+New-Item -ItemType Directory -Force -Path $seed, $in, $single | Out-Null
 try {
     $bmpPath = Join-Path $seed 'sample.bmp'
     Write-TestBmp $bmpPath 96 64
-    # Produce a PNG and a JPEG from the BMP using ImageOptimizer itself so we test all routes.
-    & $ExePath --input $bmpPath --output (Join-Path $work 'gen_png')  --format png  --quiet --no-zopfli --png-preset 1
-    & $ExePath --input $bmpPath --output (Join-Path $work 'gen_jpg')  --format jpeg --quiet
-    Copy-Item (Join-Path $work 'gen_png/PNG/sample.png')  (Join-Path $in 'a.png') -Force
-    Copy-Item (Join-Path $work 'gen_jpg/JPEG/sample.jpg') (Join-Path $in 'b.jpg') -Force
+    # Single-file mode (positional args, inferred output format, no Reports/ created)
+    $aPng = Join-Path $in 'a.png'
+    $bJpg = Join-Path $in 'b.jpg'
+    & $ExePath $bmpPath $aPng --quiet --no-zopfli --png-preset 1
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $aPng)) { Fail 'single-file BMP -> PNG failed' }
+    & $ExePath $bmpPath $bJpg --quiet
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $bJpg)) { Fail 'single-file BMP -> JPEG failed' }
+    & $ExePath $aPng (Join-Path $single 'out.webp') --quiet
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $single 'out.webp'))) { Fail 'single-file PNG -> WebP failed' }
+    & $ExePath $aPng (Join-Path $single 'out.jxl') --lossless --effort 3 --quiet
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $single 'out.jxl'))) { Fail 'single-file PNG -> JXL lossless failed' }
+    if ((Test-Path (Join-Path $in 'Reports')) -or (Test-Path (Join-Path $single 'Reports'))) { Fail 'single-file mode unexpectedly created Reports/' }
+    else { Write-Ok 'single-file input -> output ok (no Reports/ created)' }
 
+    # Directory mode (default: no Reports/; --report: writes report.json)
     foreach ($fmt in 'jxl', 'webp', 'jpeg', 'png', 'original') {
         $o = Join-Path $outRoot "default-$fmt"
         & $ExePath --input $in --output $o --format $fmt --quiet --no-zopfli --png-preset 1 --effort 3
         if ($LASTEXITCODE -ne 0) { Fail "default '$fmt' returned exit code $LASTEXITCODE"; continue }
-        $rep = Get-Content -Raw (Join-Path $o 'Reports/report.json') | ConvertFrom-Json
-        if ($rep.summary.failed -ne 0) { Fail "default '$fmt': $($rep.summary.failed) file(s) failed" }
-        else { Write-Ok "default '$fmt': $($rep.summary.written + $rep.summary.kept_original) file(s) ok" }
+        if (Test-Path (Join-Path $o 'Reports')) { Fail "default '$fmt' unexpectedly created Reports/ without --report" }
+        else { Write-Ok "default '$fmt': ok (no Reports/)" }
     }
     foreach ($fmt in 'jxl', 'webp', 'png', 'original') {
         $o = Join-Path $outRoot "lossless-$fmt"
-        & $ExePath --input $in --output $o --format $fmt --lossless --quiet --no-zopfli --png-preset 1 --effort 3
+        & $ExePath --input $in --output $o --format $fmt --lossless --quiet --no-zopfli --png-preset 1 --effort 3 --report
         if ($LASTEXITCODE -ne 0) { Fail "lossless '$fmt' returned exit code $LASTEXITCODE"; continue }
         $rep = Get-Content -Raw (Join-Path $o 'Reports/report.json') | ConvertFrom-Json
         if ($rep.summary.failed -ne 0) { Fail "lossless '$fmt': $($rep.summary.failed) file(s) failed" }
-        else { Write-Ok "lossless '$fmt': $($rep.summary.written + $rep.summary.kept_original) file(s) ok (verified)" }
+        else { Write-Ok "lossless '$fmt': $($rep.summary.written + $rep.summary.kept_original) file(s) ok (verified, --report ok)" }
     }
 } finally { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }
 

@@ -44,6 +44,7 @@ pub struct FileConfig {
     pub overwrite: Option<bool>,
     pub recursive: Option<bool>,
     pub keep_larger: Option<bool>,
+    pub report: Option<bool>,
     pub verify: Option<bool>,
     pub max_pixels: Option<u64>,
 }
@@ -53,6 +54,9 @@ pub struct Settings {
     pub input: PathBuf,
     pub output: PathBuf,
     pub format: TargetFormat,
+    /// True when `--format` (or `format` in JSON config) was explicitly set by the user.
+    #[serde(skip)]
+    pub format_explicit: bool,
     pub mode: Mode,
     /// Quality as given by the user; upstream codec defaults apply when omitted.
     pub quality: Option<f32>,
@@ -75,6 +79,7 @@ pub struct Settings {
     pub dry_run: bool,
     pub recursive: bool,
     pub keep_larger: bool,
+    pub report: bool,
     pub verify: bool,
     pub max_pixels: u64,
     pub quiet: bool,
@@ -111,8 +116,18 @@ impl Settings {
             }
             None => FileConfig::default(),
         };
-        let input = cli.input.clone().or(file.input).ok_or_else(|| Error::Invalid("--input is required".into()))?;
-        let output = cli.output.clone().or(file.output).ok_or_else(|| Error::Invalid("--output is required".into()))?;
+        let input = cli
+            .input
+            .clone()
+            .or_else(|| cli.input_pos.clone())
+            .or(file.input)
+            .ok_or_else(|| Error::Invalid("--input (or INPUT path) is required".into()))?;
+        let output = cli
+            .output
+            .clone()
+            .or_else(|| cli.output_pos.clone())
+            .or(file.output)
+            .ok_or_else(|| Error::Invalid("--output (or OUTPUT path) is required".into()))?;
 
         let mode = if cli.lossless {
             Mode::Lossless
@@ -182,10 +197,13 @@ impl Settings {
             return Err(Error::Invalid("--jobs and --threads must be at least 1".into()));
         }
 
+        let explicit_format = cli.format.or(file.format);
+
         Ok(Settings {
             input,
             output,
-            format: cli.format.or(file.format).unwrap_or(TargetFormat::Original),
+            format: explicit_format.unwrap_or(TargetFormat::Original),
+            format_explicit: explicit_format.is_some(),
             mode,
             quality,
             distance,
@@ -209,6 +227,7 @@ impl Settings {
             dry_run: cli.dry_run,
             recursive: cli.recursive || file.recursive.unwrap_or(false),
             keep_larger: cli.keep_larger || file.keep_larger.unwrap_or(false),
+            report: cli.report || file.report.unwrap_or(false),
             verify: cli.verify.or(file.verify).unwrap_or(true),
             max_pixels: cli.max_pixels.or(file.max_pixels).unwrap_or(DEFAULT_MAX_PIXELS),
             quiet: cli.quiet,

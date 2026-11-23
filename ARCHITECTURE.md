@@ -43,8 +43,11 @@ inside the same pool.
 are compared including their RGB values (unless `--optimize-alpha` is enabled for PNG, which verifies alpha equality and
 RGB equality for every pixel with alpha > 0).
 
-**Output planning.** `<output>/<Format dir>/<relative dir>/<name>.<ext>`; name collisions caused by different sources
-(`a.png`, `a.jpg` → `a.jxl`) get a deterministic suffix (`a-jpg.jxl`).
+**Output planning.** Single-file mode (`ImageOptimizer in.png out.webp` or `-i in.png -o out.webp`) writes directly to
+the exact output file path and infers the target format from its extension when `--format` is omitted. Directory mode
+writes `<output>/<Format dir>/<relative dir>/<name>.<ext>`; name collisions caused by different sources (`a.png`,
+`a.jpg` → `a.jxl`) get a deterministic suffix (`a-jpg.jxl`). `Reports/` (`report.csv` / `report.json`) is opt-in via
+`--report`.
 
 **Safety rules**: sources opened read-only; destination ≠ source checked; temp files cleaned on failure; no output is
 written if verification fails; limits on pixel count (`--max-pixels`) and decompressed size.
