@@ -11,7 +11,25 @@ use image_optimizer::image::encoder::write_png;
 use image_optimizer::image::identification::{apng_info, png_chunks, Format};
 
 fn s_fast() -> Settings {
-    settings(&["--no-zopfli", "--png-preset", "2"])
+    settings(&[])
+}
+
+#[test]
+fn default_matches_oxipng_preset_2_libdeflate_and_max_compression_enables_zopfli() {
+    let def = settings(&[]);
+    assert_eq!(def.png_preset, 2);
+    assert!(!def.zopfli);
+    assert!(!def.optimize_alpha);
+
+    let opt_max = settings(&["--opt", "max", "-z"]);
+    assert_eq!(opt_max.png_preset, 6);
+    assert!(opt_max.zopfli);
+
+    let mc = settings(&["--max-compression"]);
+    assert_eq!(mc.png_preset, 6);
+    assert!(mc.zopfli);
+    assert_eq!(mc.zopfli_iterations, 60);
+    assert_eq!(mc.zopfli_no_improvement, Some(15));
 }
 
 fn lim() -> DecodeLimits {

@@ -10,13 +10,17 @@ use crate::image::metadata::Metadata;
 #[derive(Clone, Debug)]
 pub struct WebpOptions {
     pub lossless: bool,
-    /// 0..=100. In lossless mode this trades speed for size (like `cwebp -z`/`-q`).
-    pub quality: f32,
-    /// 0..=6 (`cwebp -m`).
-    pub method: i32,
+    /// Optional `cwebp -z 0..=9` lossless preset (`WebPConfigLosslessPreset`).
+    pub lossless_preset: Option<i32>,
+    /// 0..=100 (`cwebp -q`). In lossless mode this trades speed for size. `None` keeps preset default.
+    pub quality: Option<f32>,
+    /// 0..=6 (`cwebp -m`). `None` keeps preset default.
+    pub method: Option<i32>,
     /// 0..=100 (`cwebp -alpha_q`).
     pub alpha_quality: i32,
     pub threads: i32,
+    /// Preserve RGB values hidden under fully transparent pixels (`cwebp -exact`).
+    pub exact: bool,
     /// Lossy RGB->YUV sharp conversion (`cwebp -sharp_yuv`).
     pub sharp_yuv: bool,
 }
@@ -30,15 +34,16 @@ pub fn version() -> String {
 /// `raster` must be 8-bit RGB or RGBA.
 pub fn encode(raster: &Raster, meta: &Metadata, o: &WebpOptions) -> Result<Vec<u8>> {
     let img = borrowed_image(raster, meta);
+    let is_lossless = o.lossless || o.lossless_preset.is_some();
     let params = WebpParams {
-        lossless: o.lossless as i32,
-        quality: o.quality,
-        method: o.method,
+        lossless: is_lossless as i32,
+        lossless_preset: o.lossless_preset.unwrap_or(-1),
+        quality: o.quality.unwrap_or(if o.lossless_preset.is_some() { -1.0 } else { 75.0 }),
+        method: o.method.unwrap_or(if o.lossless_preset.is_some() { -1 } else { 4 }),
         alpha_quality: o.alpha_quality,
         threads: o.threads,
-        // Lossless keeps the RGB values hidden under fully transparent pixels.
-        exact: o.lossless as i32,
-        sharp_yuv: (!o.lossless && o.sharp_yuv) as i32,
+        exact: (is_lossless && o.exact) as i32,
+        sharp_yuv: (!is_lossless && o.sharp_yuv) as i32,
     };
     let mut out = OwnedBuffer::new();
     let mut err = ErrBuf::new();

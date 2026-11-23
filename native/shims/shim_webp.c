@@ -119,9 +119,18 @@ int shim_webp_encode(const io_image *in, const webp_params *p, io_buffer *out, c
         io_set_err(err, "WebPConfigInit failed (library version mismatch)");
         return IO_ERR_GENERIC;
     }
-    config.lossless = p->lossless ? 1 : 0;
-    config.quality = p->quality;
-    config.method = p->method;
+    if (p->lossless_preset >= 0) {
+        if (!WebPConfigLosslessPreset(&config, p->lossless_preset)) {
+            io_set_err(err, "invalid WebP lossless preset (must be 0..9)");
+            return IO_ERR_GENERIC;
+        }
+        if (p->quality >= 0.0f) config.quality = p->quality;
+        if (p->method >= 0) config.method = p->method;
+    } else {
+        config.lossless = p->lossless ? 1 : 0;
+        config.quality = p->quality;
+        config.method = p->method;
+    }
     config.alpha_quality = p->alpha_quality;
     config.thread_level = p->threads > 1 ? 1 : 0;
     config.exact = p->exact ? 1 : 0;
@@ -136,7 +145,7 @@ int shim_webp_encode(const io_image *in, const webp_params *p, io_buffer *out, c
     }
     pic.width = (int)in->width;
     pic.height = (int)in->height;
-    pic.use_argb = p->lossless ? 1 : 0;
+    pic.use_argb = config.lossless ? 1 : 0;
     WebPMemoryWriterInit(&writer);
     pic.writer = WebPMemoryWrite;
     pic.custom_ptr = &writer;

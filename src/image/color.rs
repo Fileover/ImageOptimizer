@@ -188,3 +188,20 @@ impl Raster {
         }
     }
 }
+
+/// Compares two canonical RGBA16 buffers on alpha equality and visible RGB equality
+/// (ignoring hidden RGB values where alpha == 0).
+pub fn visible_pixels_equal(a: &[u16], b: &[u16]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
+        if pa[3] != pb[3] {
+            return false;
+        }
+        if pa[3] > 0 && pa[..3] != pb[..3] {
+            return false;
+        }
+    }
+    true
+}

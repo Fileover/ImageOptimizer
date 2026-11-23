@@ -84,7 +84,7 @@ fn progressive_and_auto_mode_switches_are_honoured() {
     let src = fixture("baseline_plain.jpg");
     let is_prog = |d: &[u8]| d.windows(2).any(|w| w == [0xFF, 0xC2]);
 
-    let prog = settings(&["--jpeg-mode", "progressive"]);
+    let prog = settings(&["--all-progressive"]);
     let ep = jpeg::optimize(&ctx(&prog), &src).unwrap();
     assert!(is_prog(&ep.bytes));
     assert_eq!(
@@ -92,11 +92,11 @@ fn progressive_and_auto_mode_switches_are_honoured() {
         Verification::CoefficientsIdentical
     );
 
-    let base = settings(&["--jpeg-mode", "baseline"]);
+    let base = settings(&["--all-normal"]);
     let eb = jpeg::optimize(&ctx(&base), &fixture("progressive.jpg")).unwrap();
     assert!(!is_prog(&eb.bytes));
 
-    let auto = settings(&["--jpeg-mode", "auto"]);
+    let auto = settings(&["--max-compression"]);
     let ea = jpeg::optimize(&ctx(&auto), &src).unwrap();
     let eb_plain = jpeg::optimize(&ctx(&base), &src).unwrap();
     assert_eq!(ea.bytes.len(), ep.bytes.len().min(eb_plain.bytes.len()));

@@ -3,14 +3,13 @@
 ## 0.1.0 — unreleased
 * First implementation: JPEG XL, WebP, JPEG and PNG engines linked statically (libjxl 0.13.0, libwebp 1.6.0,
   MozJPEG 4.1.5 + jpegoptim 1.5.6 core, OxiPNG 10.2.1/Zopfli).
-* Upstream-aligned per-codec defaults tuned for maximum compression effort (`cjxl`, `cwebp`, `jpegoptim`, MozJPEG
-  `cjpeg`, `oxipng`), plus strict `--lossless` mode across all codecs and `--lossy` override.
-* `jpegoptim --max` smart lossless fallback for JPEG→JPEG when `--quality` is specified, `--jpeg-mode auto` (baseline
-  vs progressive comparison), `--sharp-yuv` for lossy WebP, and `--optimize-alpha` for PNG.
-* Metadata preserved by default across all codecs (`--strip-metadata` / `--strip-icc`); magic-byte detection;
-  verification matrix; atomic writes.
-* JPEG XL lossless maximum optimization: unlocked `--effort 11` (automatically calling `JxlEncoderAllowExpertOptions`)
-  and added `--brotli-effort 0..11` (default `11`), matching `cjxl --distance=0 --effort=11 --allow_expert_options --brotli_effort=11`.
+* Canonical CLI invocation `ImageOptimizer [OPTIONS] <INPUT> <OUTPUT>` matching exact upstream tool defaults and flags:
+  `cjxl` (`-d`, `-e`, `--allow_expert_options`, `--brotli_effort`, `--lossless_jpeg`; default `d=1.0, e=7, brotli=9`),
+  `cwebp` (`-q`, `-m`, `--lossless-preset`, `--alpha_q`, `--exact`, `--sharp_yuv`; default `q=75, m=4`),
+  `jpegoptim` (`--max`, `--all-progressive`, `--all-normal`, `--strip-all`; lossless default + smart fallback),
+  MozJPEG `cjpeg` (`q=75` progressive/trellis), and `oxipng` (`--opt 0-6|max`, `-z`/`--zopfli`, `--zi`, `--ziwi`,
+  `-a`/`--alpha`; default `--opt 2` libdeflate).
+* Added `--max-compression` (`--best`) preset to enable maximum compression effort across all codecs in one flag.
 * Downscale-only resizing (`--resize 256x256`, `256x`, `x256`, `256x256!`) with selectable resampling filter
   (`--resize-filter`, default `lanczos3`), premultiplied-alpha handling, and EXIF orientation normalization; never
   upscales and keeps lossless bitstream fast paths for images already within bounds.

@@ -1,14 +1,13 @@
-//! PNG profile (OxiPNG library, Zopfli deflate).
+//! PNG profile (OxiPNG library + optional Zopfli deflate).
 //!
-//! Maximum compression = oxipng preset 6 (`Options::max_compression`) with the Zopfli deflater.
-//! Preserves hidden RGB under alpha 0 (`optimize_alpha=false`, upstream oxipng default) unless
-//! `--optimize-alpha` is enabled (disallowed in `--lossless` mode), never scales 16-bit samples,
-//! and keeps metadata chunks unless stripping is requested.
+//! Matches `oxipng` upstream defaults: preset 2 (`--opt 2`), libdeflate, `optimize_alpha=false`,
+//! `scale_16=false`, metadata preserved unless stripping is requested. Use `--opt max -z` or
+//! `--max-compression` for preset 6 + Zopfli.
 
 use super::{Ctx, Encoded, Verification};
 use crate::engines::oxipng::{self, PngOptions};
 use crate::errors::{Error, Result};
-use crate::image::color::Raster;
+use crate::image::color::{visible_pixels_equal, Raster};
 use crate::image::decoder::{decode, DecodeLimits};
 use crate::image::encoder::write_png;
 use crate::image::identification::{apng_info, png_chunks, Format};
@@ -40,7 +39,7 @@ fn describe(o: &PngOptions) -> String {
                 o.zopfli_no_improvement.map(|n| n.to_string()).unwrap_or_else(|| "unlimited".into())
             )
         } else {
-            "libdeflate(12)".to_string()
+            "libdeflate".to_string()
         },
         o.optimize_alpha,
         o.strip_metadata,
@@ -81,22 +80,7 @@ fn decode_png(bytes: &[u8], ctx: &Ctx) -> Result<Raster> {
     Ok(decode(bytes, Format::Png, &lim)?.raster)
 }
 
-fn visible_pixels_equal(a: &[u16], b: &[u16]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    for (pa, pb) in a.chunks_exact(4).zip(b.chunks_exact(4)) {
-        if pa[3] != pb[3] {
-            return false;
-        }
-        if pa[3] > 0 && pa[..3] != pb[..3] {
-            return false;
-        }
-    }
-    true
-}
-
-/// Output must decode to the expected samples (strict RGBA16 unless `--optimize-alpha` is enabled).
+/// Output must decode to the expected samples (strict RGBA16 unless `--alpha`/`--optimize-alpha` is enabled).
 pub fn verify_raster(ctx: &Ctx, expected: &Raster, out: &[u8]) -> Result<Verification> {
     let got = decode_png(out, ctx)?;
     if got.width != expected.width || got.height != expected.height {

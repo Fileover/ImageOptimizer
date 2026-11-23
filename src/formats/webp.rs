@@ -1,43 +1,65 @@
 //! WebP profiles (libwebp / cwebp).
 //!
-//! Follows `cwebp` upstream defaults, tuned for maximum compression effort:
-//! * Default (lossy): quality 75 (`cwebp -q 75`), method 6 (`cwebp -m 6`), alpha quality 100
-//!   (`cwebp -alpha_q 100`), optional `--sharp-yuv`.
-//! * Lossless (`--lossless`, or lossless WebP in `--format original`): `lossless=1`, `exact=1`
-//!   (hidden RGB under transparent pixels is preserved), method 6, quality 100 (`cwebp -z 9`).
+//! Matches `cwebp` upstream defaults:
+//! * Default (lossy): `quality = 75` (`-q 75`), `method = 4` (`-m 4`), `alpha_q = 100`,
+//!   `sharp_yuv = false`.
+//! * Lossless (`--lossless`, `--lossless-preset 0..9`, or lossless WebP in `--format original`):
+//!   `lossless = 1`, `quality = 75` (effort trade-off, `100` under `--max-compression`),
+//!   `method = 4` (`6` under `--max-compression`), `exact = false` unless `--exact` is passed.
 
 use super::{Ctx, Encoded, Verification};
-use crate::config::{DEFAULT_WEBP_METHOD, DEFAULT_WEBP_QUALITY};
+use crate::config::{DEFAULT_WEBP_METHOD, DEFAULT_WEBP_QUALITY, MAX_WEBP_METHOD};
 use crate::engines::libwebp::{self, WebpOptions};
 use crate::errors::{Error, Result};
-use crate::image::color::Raster;
+use crate::image::color::{visible_pixels_equal, Raster};
 use crate::image::metadata::Metadata;
 
 pub fn options_for(ctx: &Ctx, lossless: bool) -> WebpOptions {
     let s = ctx.settings;
-    if lossless {
-        WebpOptions {
-            lossless: true,
-            quality: 100.0,
-            method: s.method.unwrap_or(DEFAULT_WEBP_METHOD),
-            alpha_quality: 100,
-            threads: ctx.threads,
-            sharp_yuv: false,
+    let is_lossless = lossless || s.lossless_preset.is_some();
+    if is_lossless {
+        if let Some(preset) = s.lossless_preset {
+            WebpOptions {
+                lossless: true,
+                lossless_preset: Some(preset),
+                quality: s.quality,
+                method: s.method,
+                alpha_quality: 100,
+                threads: ctx.threads,
+                exact: s.exact,
+                sharp_yuv: false,
+            }
+        } else {
+            let def_q = if s.max_compression { 100.0 } else { DEFAULT_WEBP_QUALITY };
+            let def_m = if s.max_compression { MAX_WEBP_METHOD } else { DEFAULT_WEBP_METHOD };
+            WebpOptions {
+                lossless: true,
+                lossless_preset: None,
+                quality: Some(s.quality.unwrap_or(def_q)),
+                method: Some(s.method.unwrap_or(def_m)),
+                alpha_quality: 100,
+                threads: ctx.threads,
+                exact: s.exact,
+                sharp_yuv: false,
+            }
         }
     } else {
+        let def_m = if s.max_compression { MAX_WEBP_METHOD } else { DEFAULT_WEBP_METHOD };
         WebpOptions {
             lossless: false,
-            quality: s.quality.unwrap_or(DEFAULT_WEBP_QUALITY),
-            method: s.method.unwrap_or(DEFAULT_WEBP_METHOD),
+            lossless_preset: None,
+            quality: Some(s.quality.unwrap_or(DEFAULT_WEBP_QUALITY)),
+            method: Some(s.method.unwrap_or(def_m)),
             alpha_quality: s.alpha_quality.unwrap_or(100),
             threads: ctx.threads,
+            exact: false,
             sharp_yuv: s.sharp_yuv,
         }
     }
 }
 
 pub fn options(ctx: &Ctx) -> WebpOptions {
-    options_for(ctx, ctx.strict_lossless())
+    options_for(ctx, ctx.strict_lossless() || ctx.settings.lossless_preset.is_some())
 }
 
 /// Brings a raster into the 8-bit RGB/RGBA layout libwebp accepts.
@@ -63,20 +85,22 @@ fn prepare(lossless: bool, r: &Raster, notes: &mut Vec<String>) -> Result<Raster
 }
 
 pub fn encode_with_mode(ctx: &Ctx, r: &Raster, meta: &Metadata, lossless: bool) -> Result<Encoded> {
+    let effective_lossless = lossless || ctx.settings.lossless_preset.is_some();
     let mut notes = Vec::new();
-    let r8 = prepare(lossless, r, &mut notes)?;
+    let r8 = prepare(effective_lossless, r, &mut notes)?;
     let mut m = meta.clone();
     m.apply_strip(ctx.settings.strip_metadata, ctx.settings.strip_icc);
-    let o = options_for(ctx, lossless);
+    let o = options_for(ctx, effective_lossless);
     let bytes = libwebp::encode(&r8, &m, &o)?;
     let settings = format!(
-        "libwebp {}: lossless={} quality={} method={} alpha_quality={} exact={} sharp_yuv={} threads={}",
+        "libwebp {}: lossless={} preset={} quality={} method={} alpha_q={} exact={} sharp_yuv={} threads={}",
         libwebp::version(),
         o.lossless,
-        o.quality,
-        o.method,
+        o.lossless_preset.map(|z| z.to_string()).unwrap_or_else(|| "-".into()),
+        o.quality.map(|q| q.to_string()).unwrap_or_else(|| "preset".into()),
+        o.method.map(|m| m.to_string()).unwrap_or_else(|| "preset".into()),
         o.alpha_quality,
-        o.lossless,
+        o.lossless && o.exact,
         !o.lossless && o.sharp_yuv,
         o.threads
     );
@@ -87,8 +111,7 @@ pub fn encode(ctx: &Ctx, r: &Raster, meta: &Metadata) -> Result<Encoded> {
     encode_with_mode(ctx, r, meta, ctx.strict_lossless())
 }
 
-/// `expected` is the raster that was *intended* to be stored (before 8-bit/gray preparation
-/// would have changed it - in lossless mode preparation is exact).
+/// `expected` is the raster that was *intended* to be stored.
 pub fn verify(ctx: &Ctx, expected: &Raster, out: &[u8], was_lossless: bool) -> Result<Verification> {
     let dec = libwebp::decode(out, ctx.settings.max_pixels)?;
     if dec.raster.width != expected.width || dec.raster.height != expected.height {
@@ -97,8 +120,18 @@ pub fn verify(ctx: &Ctx, expected: &Raster, out: &[u8], was_lossless: bool) -> R
     if !was_lossless {
         return Ok(Verification::DecodableOnly);
     }
-    if dec.raster.to_rgba16()? != expected.to_rgba16()? {
-        return Err(Error::Verification("decoded WebP pixels differ from the source pixels".into()));
+    let a = dec.raster.to_rgba16()?;
+    let b = expected.to_rgba16()?;
+    if ctx.settings.exact {
+        if a != b {
+            return Err(Error::Verification("decoded WebP pixels differ from the source pixels".into()));
+        }
+        Ok(Verification::PixelIdentical)
+    } else if a == b {
+        Ok(Verification::PixelIdentical)
+    } else if visible_pixels_equal(&a, &b) {
+        Ok(Verification::VisiblePixelsIdentical)
+    } else {
+        Err(Error::Verification("decoded WebP visible pixels or alpha channel differ from the source".into()))
     }
-    Ok(Verification::PixelIdentical)
 }

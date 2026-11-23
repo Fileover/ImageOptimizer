@@ -52,10 +52,12 @@ fn fixture_dir() -> Fixture {
         &Default::default(),
         &libwebp::WebpOptions {
             lossless: true,
-            quality: 100.0,
-            method: 2,
+            lossless_preset: None,
+            quality: Some(100.0),
+            method: Some(2),
             alpha_quality: 100,
             threads: 1,
+            exact: true,
             sharp_yuv: false,
         },
     )
@@ -64,7 +66,7 @@ fn fixture_dir() -> Fixture {
     let jxl = libjxl::encode(
         &raster,
         &Default::default(),
-        &libjxl::JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true },
+        &libjxl::JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 9, threads: 1, store_metadata: true },
     )
     .unwrap();
     std::fs::write(input.join("e.jxl"), jxl).unwrap();
@@ -113,14 +115,28 @@ fn single_file_positional_infers_format_and_creates_no_reports() {
     let rebuilt = libjxl::decode_jpeg(&std::fs::read(&out_jxl_jpg).unwrap(), 1).unwrap();
     assert_eq!(rebuilt, Some(std::fs::read(&src_jpg).unwrap()));
 
-    // PNG -> JPEG and PNG -> PNG
+    // Exact cjxl-style options-before-paths invocation:
+    // ImageOptimizer --distance=0 --effort=11 --allow_expert_options --brotli_effort=11 input output
+    let out_cjxl = work.join("cjxl_style.jxl");
+    let o = run(&[
+        "--distance=0",
+        "--effort=11",
+        "--allow_expert_options",
+        "--brotli_effort=11",
+        src_png.to_str().unwrap(),
+        out_cjxl.to_str().unwrap(),
+    ]);
+    assert_eq!(o.status.code(), Some(0), "{}{}", stdout(&o), String::from_utf8_lossy(&o.stderr));
+    assert_eq!(identify(&std::fs::read(&out_cjxl).unwrap()), Some(Format::JpegXl));
+
+    // PNG -> JPEG and PNG -> PNG (options before paths)
     let out_jpg = work.join("photo.jpg");
     assert_eq!(run(&[src_png.to_str().unwrap(), out_jpg.to_str().unwrap()]).status.code(), Some(0));
     assert_eq!(identify(&std::fs::read(&out_jpg).unwrap()), Some(Format::Jpeg));
 
     let out_png = work.join("photo.png");
     assert_eq!(
-        run(&[src_png.to_str().unwrap(), out_png.to_str().unwrap(), "--no-zopfli", "--png-preset", "1"]).status.code(),
+        run(&["--opt", "1", src_png.to_str().unwrap(), out_png.to_str().unwrap()]).status.code(),
         Some(0)
     );
     assert_eq!(identify(&std::fs::read(&out_png).unwrap()), Some(Format::Png));
@@ -325,12 +341,16 @@ fn lossless_flag_refuses_lossy_conversions_with_a_clear_reason() {
 }
 
 #[test]
-fn quality_and_distance_work_without_lossy_and_conflict_with_lossless() {
+fn quality_and_distance_match_upstream_rules_and_guards() {
     let f = fixture_dir();
-    assert_eq!(run(&base(&f, &["--format", "webp", "--quality", "80"])).status.code(), Some(0));
-    assert_eq!(run(&base(&f, &["--format", "jxl", "--distance", "1.5", "--effort", "3", "--overwrite"])).status.code(), Some(0));
-    assert_eq!(run(&base(&f, &["--format", "webp", "--lossless", "--quality", "80"])).status.code(), Some(2));
+    assert_eq!(run(&base(&f, &["--format", "webp", "-q", "80"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "jxl", "-d", "1.5", "-e", "3", "--overwrite"])).status.code(), Some(0));
+    // cwebp allows -lossless -q 80 (effort trade-off); jpeg/jxl reject lossy quality/distance with --lossless.
+    assert_eq!(run(&base(&f, &["--format", "webp", "--lossless", "-q", "80", "--overwrite"])).status.code(), Some(0));
+    assert_eq!(run(&base(&f, &["--format", "jpeg", "--lossless", "-q", "80"])).status.code(), Some(2));
+    assert_eq!(run(&base(&f, &["--format", "jxl", "--lossless", "-q", "80"])).status.code(), Some(2));
     assert_eq!(run(&base(&f, &["--format", "jxl", "--lossless", "--distance", "1.0"])).status.code(), Some(2));
+    assert_eq!(run(&base(&f, &["--format", "jxl", "--effort", "11"])).status.code(), Some(2));
     assert_eq!(run(&base(&f, &["--format", "webp", "--quality", "150"])).status.code(), Some(2));
     assert_eq!(run(&base(&f, &["--format", "jxl", "--lossy", "--distance", "0"])).status.code(), Some(2));
 }

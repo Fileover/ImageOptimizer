@@ -1,11 +1,14 @@
 mod common;
 use common::*;
+use clap::Parser;
+use image_optimizer::cli::Cli;
+use image_optimizer::config::Settings;
 use image_optimizer::engines::libjxl::{self, JxlOptions};
 use image_optimizer::formats::{jpegxl, Verification};
 use image_optimizer::image::color::Samples;
 
 fn lossless_opts() -> JxlOptions {
-    JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true }
+    JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 9, threads: 1, store_metadata: true }
 }
 
 #[test]
@@ -49,13 +52,14 @@ fn metadata_and_orientation_are_stored() {
 }
 
 #[test]
-fn jpeg_transcode_is_default_for_jpeg_and_reconstructs_original_bytes() {
+fn jpeg_transcode_is_default_for_jpeg_and_respects_lossless_jpeg_flag() {
     let s = settings(&[]);
     let c = ctx(&s);
     assert!(jpegxl::should_transcode_jpeg(&c), "cjxl defaults to lossless JPEG transcoding");
     assert!(!jpegxl::should_transcode_jpeg(&ctx(&settings(&["--lossy"]))));
     assert!(!jpegxl::should_transcode_jpeg(&ctx(&settings(&["--quality", "85"]))));
     assert!(!jpegxl::should_transcode_jpeg(&ctx(&settings(&["--distance", "1.5"]))));
+    assert!(!jpegxl::should_transcode_jpeg(&ctx(&settings(&["--lossless_jpeg=0"]))));
     assert!(jpegxl::should_transcode_jpeg(&ctx(&settings(&["--distance", "0"]))));
 
     for name in ["baseline_meta.jpg", "baseline_plain.jpg", "progressive.jpg"] {
@@ -71,26 +75,46 @@ fn jpeg_transcode_is_default_for_jpeg_and_reconstructs_original_bytes() {
 }
 
 #[test]
-fn pixel_jxl_defaults_to_cjxl_distance_1_and_supports_lossless_flags() {
+fn cjxl_defaults_expert_options_and_max_compression_match_upstream() {
+    // Upstream cjxl default: distance=1.0, effort=7, brotli_effort=9.
     let def = settings(&[]);
     let o_def = jpegxl::options(&ctx(&def)).unwrap();
     assert!(!o_def.lossless);
     assert_eq!(o_def.distance, 1.0);
-    assert_eq!(o_def.effort, 9);
+    assert_eq!(o_def.effort, 7);
+    assert_eq!(o_def.brotli_effort, 9);
 
-    for extra in [&["--lossless"][..], &["--distance", "0"][..], &["--quality", "100"][..]] {
+    // Lossless flags without --effort keep cjxl default effort=7, brotli_effort=9.
+    for extra in [&["--lossless"][..], &["--distance=0"][..], &["-d", "0"][..], &["-q", "100"][..]] {
         let s = settings(extra);
         let o = jpegxl::options(&ctx(&s)).unwrap();
         assert!(o.lossless, "{extra:?} must resolve to lossless JXL");
         assert_eq!(o.distance, 0.0);
-        assert_eq!(o.effort, 11);
-        assert_eq!(o.brotli_effort, 11);
+        assert_eq!(o.effort, 7);
+        assert_eq!(o.brotli_effort, 9);
     }
 
-    // Effort 11 (expert options) + brotli_effort 11 actually encodes and roundtrips pixel-exact.
+    // Effort 11 requires --allow_expert_options (matching cjxl).
+    let no_expert = Cli::parse_from(["ImageOptimizer", "--distance=0", "--effort=11", "in.png", "out.jxl"]);
+    assert!(Settings::resolve(&no_expert).is_err());
+
+    // Exact cjxl CLI flags work verbatim:
+    let cjxl_max = settings(&["--distance=0", "--effort=11", "--allow_expert_options", "--brotli_effort=11"]);
+    let o_cjxl = jpegxl::options(&ctx(&cjxl_max)).unwrap();
+    assert!(o_cjxl.lossless);
+    assert_eq!(o_cjxl.effort, 11);
+    assert_eq!(o_cjxl.brotli_effort, 11);
+
+    // --lossless --max-compression selects effort=11 + brotli_effort=11 automatically.
+    let max_ll = settings(&["--lossless", "--max-compression"]);
+    let o_max = jpegxl::options(&ctx(&max_ll)).unwrap();
+    assert!(o_max.lossless);
+    assert_eq!(o_max.effort, 11);
+    assert_eq!(o_max.brotli_effort, 11);
+
+    // Effort 11 + brotli_effort 11 actually encodes and roundtrips pixel-exact.
     let small = pattern(24, 24, 4, 8);
-    let expert_opts = JxlOptions { lossless: true, distance: 0.0, effort: 11, brotli_effort: 11, threads: 1, store_metadata: true };
-    let encoded = libjxl::encode(&small, &metadata(1), &expert_opts).unwrap();
+    let encoded = libjxl::encode(&small, &metadata(1), &o_cjxl).unwrap();
     let decoded = libjxl::decode(&encoded, 1 << 26, 1, true).unwrap();
     assert_eq!(rgba16(&decoded.raster), rgba16(&small));
 
@@ -109,13 +133,13 @@ fn pixel_jxl_has_no_jpeg_reconstruction_data() {
 fn lossy_is_smaller_and_decodable() {
     let r = pattern(64, 64, 3, 8);
     let lossless = libjxl::encode(&r, &Default::default(), &lossless_opts()).unwrap();
-    let lossy_opts = JxlOptions { lossless: false, distance: 2.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true };
+    let lossy_opts = JxlOptions { lossless: false, distance: 2.0, effort: 3, brotli_effort: 9, threads: 1, store_metadata: true };
     let lossy = libjxl::encode(&r, &Default::default(), &lossy_opts).unwrap();
     assert!(lossy.len() < lossless.len());
     let d = libjxl::decode(&lossy, 1 << 26, 1, true).unwrap();
     assert_eq!((d.raster.width, d.raster.height), (64, 64));
 
-    let s_def = settings(&["--effort", "3"]);
+    let s_def = settings(&["-e", "3"]);
     let enc = jpegxl::encode(&ctx(&s_def), &r, &Default::default()).unwrap();
     assert!(!enc.lossless);
     assert_eq!(

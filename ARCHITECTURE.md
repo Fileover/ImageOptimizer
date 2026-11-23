@@ -21,11 +21,12 @@ exposes a flat ABI (`io_shim.h`: `io_image`, `io_buffer`, parameter structs, int
 Buffers are `malloc`ed in C and owned by RAII wrappers in Rust (`OwnedBuffer`/`OwnedImage`). Struct layout is always
 computed by the C compiler. Errors from libjpeg use `setjmp/longjmp` inside the shim only.
 
-**Compression modes.** `Mode::Default` follows each upstream tool's default behavior (`cjxl`, `cwebp`, `jpegoptim`,
-MozJPEG `cjpeg`, `oxipng`) with maximum compression effort. `Mode::Lossless` (`--lossless`) enforces strict
-mathematically lossless encoding/transcoding across all formats and refuses routes that require loss. `Mode::Lossy`
-(`--lossy`) forces lossy encoding even on routes whose upstream default is lossless (JPEG→JPEG, JPEG→JXL). Each
-`FileResult` records the actual effective mode (`lossless` or `lossy`) applied to that file.
+**Compression modes.** `Mode::Default` follows each upstream tool's exact default settings and flags (`cjxl`, `cwebp`,
+`jpegoptim`, MozJPEG `cjpeg`, `oxipng`). `Mode::Lossless` (`--lossless`) enforces mathematically lossless encoding
+across all formats and refuses routes that require loss. `Mode::Lossy` (`--lossy`) forces lossy encoding even on routes
+whose upstream default is lossless (JPEG→JPEG, JPEG→JXL). `--max-compression` upgrades all codecs to maximum compression
+effort while remaining overridable by individual flags. Each `FileResult` records the effective mode (`lossless` or
+`lossy`) applied to that file.
 
 **Per-file pipeline** (`processing/pipeline.rs`): read → identify (magic bytes) → route & resolve effective mode →
 decode (when needed) → encode/optimize → verify → keep-original decision → atomic write (temp file next to the

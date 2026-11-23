@@ -120,16 +120,16 @@ New-Item -ItemType Directory -Force -Path $seed, $in, $single | Out-Null
 try {
     $bmpPath = Join-Path $seed 'sample.bmp'
     Write-TestBmp $bmpPath 96 64
-    # Single-file mode (positional args, inferred output format, no Reports/ created)
+    # Single-file mode (options-before-paths, inferred output format, no Reports/ created)
     $aPng = Join-Path $in 'a.png'
     $bJpg = Join-Path $in 'b.jpg'
-    & $ExePath $bmpPath $aPng --quiet --no-zopfli --png-preset 1
+    & $ExePath --quiet --opt 1 $bmpPath $aPng
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $aPng)) { Fail 'single-file BMP -> PNG failed' }
-    & $ExePath $bmpPath $bJpg --quiet
+    & $ExePath --quiet $bmpPath $bJpg
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path $bJpg)) { Fail 'single-file BMP -> JPEG failed' }
-    & $ExePath $aPng (Join-Path $single 'out.webp') --quiet
+    & $ExePath --quiet $aPng (Join-Path $single 'out.webp')
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $single 'out.webp'))) { Fail 'single-file PNG -> WebP failed' }
-    & $ExePath $aPng (Join-Path $single 'out.jxl') --lossless --effort 3 --quiet
+    & $ExePath --quiet --distance=0 --effort=3 $aPng (Join-Path $single 'out.jxl')
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $single 'out.jxl'))) { Fail 'single-file PNG -> JXL lossless failed' }
     if ((Test-Path (Join-Path $in 'Reports')) -or (Test-Path (Join-Path $single 'Reports'))) { Fail 'single-file mode unexpectedly created Reports/' }
     else { Write-Ok 'single-file input -> output ok (no Reports/ created)' }

@@ -67,6 +67,7 @@ impl IoImage {
 #[repr(C)]
 pub struct WebpParams {
     pub lossless: c_int,
+    pub lossless_preset: c_int,
     pub quality: c_float,
     pub method: c_int,
     pub alpha_quality: c_int,

@@ -69,6 +69,9 @@ fn run_jpegoptim(src: &[u8], q: Option<u8>, s: &Settings) -> Result<(Vec<u8>, Jp
 
 pub fn optimize(ctx: &Ctx, src: &[u8]) -> Result<Encoded> {
     let s = ctx.settings;
+    if ctx.strict_lossless() && s.quality.is_some() {
+        return Err(Error::Invalid("--quality cannot be combined with --lossless for JPEG".into()));
+    }
     let target_q = optimize_target_quality(ctx);
     let mut notes = Vec::new();
 

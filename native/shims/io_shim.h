@@ -67,12 +67,13 @@ void io_set_err(char *err, const char *msg);
 
 /* ------------------------------------------------------------------ libwebp */
 typedef struct {
-    int lossless;      /* 1 = lossless                                              */
-    float quality;     /* 0..100 (lossless: compression effort/size trade-off)       */
-    int method;        /* 0..6                                                      */
-    int alpha_quality; /* 0..100                                                    */
-    int threads;       /* >1 enables libwebp's encoder thread                       */
-    int exact;         /* 1 = preserve RGB values under fully transparent pixels    */
+    int lossless;        /* 1 = lossless                                            */
+    int lossless_preset; /* -1 = unused, 0..9 = WebPConfigLosslessPreset (cwebp -z) */
+    float quality;       /* 0..100 (or <0 to keep lossless_preset quality)          */
+    int method;          /* 0..6 (or <0 to keep lossless_preset method)             */
+    int alpha_quality;   /* 0..100                                                  */
+    int threads;         /* >1 enables libwebp's encoder thread                     */
+    int exact;           /* 1 = preserve RGB values under fully transparent pixels  */
     int sharp_yuv;
 } webp_params;
 

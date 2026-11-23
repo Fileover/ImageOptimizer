@@ -1,25 +1,51 @@
 //! JPEG XL profiles (libjxl / cjxl).
 //!
-//! Follows `cjxl` upstream defaults, tuned for maximum standard compression effort:
-//! * JPEG -> JXL: lossless JPEG bitstream transcoding by default (`cjxl --lossless_jpeg=1`,
-//!   effort 10), unless `--lossy`, `--distance > 0`, or `--quality < 100` is specified.
-//! * non-JPEG -> JXL: visually lossless Butteraugli distance 1.0 by default (`cjxl -d 1.0`,
-//!   effort 9), or mathematically lossless (`JxlEncoderSetFrameLossless`, `uses_original_profile`,
-//!   effort 10) when `--lossless`, `--distance 0`, or `--quality 100` (without `--lossy`) is used.
+//! Matches `cjxl` upstream defaults:
+//! * JPEG -> JXL: lossless JPEG bitstream transcoding by default (`--lossless_jpeg=1`),
+//!   `effort = 7`, `brotli_effort = 9`. Passing `--lossless_jpeg=0`, `--lossy`, `--distance > 0`,
+//!   or `--quality < 100` decodes the JPEG and re-encodes pixels.
+//! * non-JPEG -> JXL: visually lossless Butteraugli `distance = 1.0`, `effort = 7`,
+//!   `brotli_effort = 9`. Passing `--lossless`, `--distance=0`, or `--quality=100` selects
+//!   mathematically lossless encoding.
+//! * `--effort=11` requires `--allow_expert_options` (or `--max-compression`, which sets
+//!   effort 11 lossless / 10 lossy and `brotli_effort = 11`).
 
 use super::{Ctx, Encoded, Verification};
 use crate::config::{
-    Mode, DEFAULT_JXL_BROTLI_EFFORT, DEFAULT_JXL_DISTANCE, DEFAULT_JXL_EFFORT_LOSSLESS,
-    DEFAULT_JXL_EFFORT_LOSSY,
+    Mode, DEFAULT_JXL_BROTLI_EFFORT, DEFAULT_JXL_DISTANCE, DEFAULT_JXL_EFFORT,
+    MAX_JXL_BROTLI_EFFORT, MAX_JXL_EFFORT_LOSSLESS, MAX_JXL_EFFORT_LOSSY,
 };
 use crate::engines::libjxl::{self, JxlOptions};
 use crate::errors::{Error, Result};
 use crate::image::color::Raster;
 use crate::image::metadata::Metadata;
 
+fn default_effort(ctx: &Ctx, lossless: bool) -> i32 {
+    let s = ctx.settings;
+    if let Some(e) = s.effort {
+        e
+    } else if s.max_compression {
+        if lossless { MAX_JXL_EFFORT_LOSSLESS } else { MAX_JXL_EFFORT_LOSSY }
+    } else {
+        DEFAULT_JXL_EFFORT
+    }
+}
+
+fn default_brotli_effort(ctx: &Ctx) -> i32 {
+    let s = ctx.settings;
+    s.brotli_effort
+        .unwrap_or(if s.max_compression { MAX_JXL_BROTLI_EFFORT } else { DEFAULT_JXL_BROTLI_EFFORT })
+}
+
 /// Returns true when a JPEG source should use lossless JPEG bitstream transcoding (`cjxl` default).
 pub fn should_transcode_jpeg(ctx: &Ctx) -> bool {
     let s = ctx.settings;
+    if s.lossless_jpeg == Some(false) {
+        return false;
+    }
+    if s.lossless_jpeg == Some(true) {
+        return true;
+    }
     match s.mode {
         Mode::Lossless => true,
         Mode::Lossy => false,
@@ -35,19 +61,28 @@ pub fn should_transcode_jpeg(ctx: &Ctx) -> bool {
     }
 }
 
-/// Resolves pixel-encoding options for JPEG XL following `cjxl` defaults + maximum effort.
+/// Resolves pixel-encoding options for JPEG XL matching `cjxl`.
 pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
     let s = ctx.settings;
-    let brotli_effort = s.brotli_effort.unwrap_or(DEFAULT_JXL_BROTLI_EFFORT);
+    let brotli_effort = default_brotli_effort(ctx);
     match s.mode {
-        Mode::Lossless => Ok(JxlOptions {
-            lossless: true,
-            distance: 0.0,
-            effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
-            brotli_effort,
-            threads: ctx.threads,
-            store_metadata: !s.strip_metadata,
-        }),
+        Mode::Lossless => {
+            if let Some(q) = s.quality {
+                if q < 100.0 {
+                    return Err(Error::Invalid(
+                        "--quality < 100 cannot be combined with --lossless for JPEG XL".into(),
+                    ));
+                }
+            }
+            Ok(JxlOptions {
+                lossless: true,
+                distance: 0.0,
+                effort: default_effort(ctx, true),
+                brotli_effort,
+                threads: ctx.threads,
+                store_metadata: !s.strip_metadata,
+            })
+        }
         Mode::Lossy => {
             let distance = match (s.distance, s.quality) {
                 (Some(d), _) => d,
@@ -63,7 +98,7 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
             Ok(JxlOptions {
                 lossless: false,
                 distance,
-                effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSY),
+                effort: default_effort(ctx, false),
                 brotli_effort,
                 threads: ctx.threads,
                 store_metadata: !s.strip_metadata,
@@ -75,25 +110,15 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
                 (None, Some(q)) => libjxl::distance_from_quality(q),
                 (None, None) => DEFAULT_JXL_DISTANCE,
             };
-            if distance <= 0.0 {
-                Ok(JxlOptions {
-                    lossless: true,
-                    distance: 0.0,
-                    effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
-                    brotli_effort,
-                    threads: ctx.threads,
-                    store_metadata: !s.strip_metadata,
-                })
-            } else {
-                Ok(JxlOptions {
-                    lossless: false,
-                    distance,
-                    effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSY),
-                    brotli_effort,
-                    threads: ctx.threads,
-                    store_metadata: !s.strip_metadata,
-                })
-            }
+            let lossless = distance <= 0.0;
+            Ok(JxlOptions {
+                lossless,
+                distance: if lossless { 0.0 } else { distance },
+                effort: default_effort(ctx, lossless),
+                brotli_effort,
+                threads: ctx.threads,
+                store_metadata: !s.strip_metadata,
+            })
         }
     }
 }
@@ -124,11 +149,22 @@ pub fn encode(ctx: &Ctx, r: &Raster, meta: &Metadata) -> Result<Encoded> {
 /// Lossless JPEG recompression (`JxlEncoderAddJPEGFrame`).
 pub fn transcode_jpeg(ctx: &Ctx, jpeg: &[u8]) -> Result<Encoded> {
     let s = ctx.settings;
+    if s.lossless_jpeg == Some(true) {
+        if s.mode == Mode::Lossy
+            || s.distance.is_some_and(|d| d > 0.0)
+            || (s.distance.is_none() && s.quality.is_some_and(|q| q < 100.0))
+        {
+            return Err(Error::Invalid(
+                "--lossless_jpeg=1 cannot be combined with lossy distance/quality (use --lossless_jpeg=0 to re-encode)"
+                    .into(),
+            ));
+        }
+    }
     let o = JxlOptions {
         lossless: true,
         distance: 0.0,
-        effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
-        brotli_effort: s.brotli_effort.unwrap_or(DEFAULT_JXL_BROTLI_EFFORT),
+        effort: default_effort(ctx, true),
+        brotli_effort: default_brotli_effort(ctx),
         threads: ctx.threads,
         store_metadata: !s.strip_metadata,
     };
@@ -141,7 +177,7 @@ pub fn transcode_jpeg(ctx: &Ctx, jpeg: &[u8]) -> Result<Encoded> {
     }
     let bytes = libjxl::encode_jpeg(jpeg, &o).map_err(|e| match e {
         Error::Codec { message, .. } => Error::Unsupported(format!(
-            "this JPEG cannot be transcoded losslessly by libjxl ({message}); pass --lossy to decode and re-encode it"
+            "this JPEG cannot be transcoded losslessly by libjxl ({message}); pass --lossless_jpeg=0 or --lossy to decode and re-encode it"
         )),
         e => e,
     })?;

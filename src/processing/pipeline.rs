@@ -158,7 +158,12 @@ pub fn effective_lossless(settings: &Settings, src: Format, dst: Format, bytes: 
             Mode::Lossy => false,
             Mode::Default => {
                 if src == Format::Jpeg {
-                    if let Some(d) = settings.distance {
+                    if settings.lossless_jpeg == Some(false) {
+                        settings.distance == Some(0.0)
+                            || (settings.distance.is_none() && settings.quality == Some(100.0))
+                    } else if settings.lossless_jpeg == Some(true) {
+                        true
+                    } else if let Some(d) = settings.distance {
                         d <= 0.0
                     } else if let Some(q) = settings.quality {
                         q >= 100.0
@@ -175,6 +180,9 @@ pub fn effective_lossless(settings: &Settings, src: Format, dst: Format, bytes: 
             Mode::Lossless => true,
             Mode::Lossy => false,
             Mode::Default => {
+                if settings.lossless_preset.is_some() {
+                    return true;
+                }
                 // In `--format original`, preserve lossless WebP (VP8L) unless lossy/quality was requested.
                 settings.format == TargetFormat::Original
                     && src == Format::WebP

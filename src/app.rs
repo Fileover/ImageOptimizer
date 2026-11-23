@@ -49,7 +49,7 @@ pub fn version_text() -> String {
 }
 
 pub fn formats_text() -> &'static str {
-    "Input formats (detected by file signature, not by extension):\n  PNG (incl. APNG, optimized in place only)\n  JPEG (baseline/progressive/arithmetic decode)\n  WebP (still images; animated WebP is refused)\n  JPEG XL (still images; animated JPEG XL is refused)\n  BMP, TIFF, GIF (GIF: single-frame only; animated GIF is refused)\n\nOutput formats (--format) and upstream defaults (all tuned for maximum optimization; add --lossless for strict lossless):\n  jxl       JPEG XL via libjxl (cjxl defaults: lossless JPEG transcode for JPEGs, lossy d=1.0 for others; effort 9 lossy / 11 lossless, brotli_effort 11)\n  webp      WebP via libwebp (cwebp default: lossy q=75, method 6; --lossless for lossless q=100 m=6 exact=1)\n  jpeg      JPEG: jpegoptim core (lossless default, lossy with --quality/--lossy) for JPEGs; MozJPEG (q=75, progressive, trellis) for conversions\n  png       PNG via OxiPNG preset 6 + Zopfli (lossless; --optimize-alpha for transparent RGB optimization)\n  original  optimize each file in its own format (PNG, JPEG, WebP, JPEG XL)\n"
+    "Input formats (detected by file signature, not by extension):\n  PNG (incl. APNG, optimized in place only)\n  JPEG (baseline/progressive/arithmetic decode)\n  WebP (still images; animated WebP is refused)\n  JPEG XL (still images; animated JPEG XL is refused)\n  BMP, TIFF, GIF (GIF: single-frame only; animated GIF is refused)\n\nOutput formats (--format) and upstream defaults (add --lossless for strict lossless, --max-compression for maximum effort):\n  jxl       JPEG XL via libjxl (cjxl defaults: d=1.0, e=7, brotli_effort=9; lossless JPEG transcode for JPEGs)\n  webp      WebP via libwebp (cwebp defaults: lossy q=75, m=4, alpha_q=100; --lossless / --lossless-preset 0..9 / --exact)\n  jpeg      JPEG: jpegoptim core (lossless default, --max=N for lossy) for JPEGs; MozJPEG cjpeg (q=75, progressive, trellis) for conversions\n  png       PNG via OxiPNG (--opt 2 libdeflate default; -z/--zopfli for Zopfli, -a/--alpha for transparent RGB)\n  original  optimize each file in its own format (PNG, JPEG, WebP, JPEG XL)\n"
 }
 
 struct Job {
@@ -147,6 +147,19 @@ fn execute(mut settings: Settings) -> Result<i32> {
                 ext.to_string_lossy(),
                 settings.output.display()
             )));
+        }
+    }
+    if settings.mode == Mode::Lossless {
+        if let Some(q) = settings.quality {
+            match settings.format {
+                TargetFormat::Jpeg => {
+                    return Err(Error::Invalid("--quality cannot be combined with --lossless for JPEG".into()));
+                }
+                TargetFormat::Jxl if q < 100.0 => {
+                    return Err(Error::Invalid("--quality < 100 cannot be combined with --lossless for JPEG XL".into()));
+                }
+                _ => {}
+            }
         }
     }
 
