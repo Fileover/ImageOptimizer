@@ -1,0 +1,4 @@
+# Statically link the C/C++ runtime into ImageOptimizer.exe so that no Visual C++
+# Redistributable is required on the end-user machine.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

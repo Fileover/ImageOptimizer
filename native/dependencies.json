@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "description": "Pinned upstream sources. scripts/bootstrap.ps1 and scripts/update-dependencies.ps1 read this file; build.rs expects the sources in the 'path' directories. A dependency is only ever changed by editing this file (or via update-dependencies.ps1) so that builds stay reproducible.",
+  "native": [
+    {
+      "name": "libwebp",
+      "role": "WebP encoder/decoder/mux (replaces cwebp)",
+      "repository": "https://github.com/webmproject/libwebp.git",
+      "tag": "v1.6.0",
+      "commit": "4fa21912338357f89e4fd51cf2368325b59e9bd9",
+      "path": "native/libwebp",
+      "license": "BSD-3-Clause",
+      "licenseFile": "native/libwebp/COPYING",
+      "buildSystem": "cmake",
+      "buildOptions": [
+        "BUILD_SHARED_LIBS=OFF", "WEBP_BUILD_CWEBP=OFF", "WEBP_BUILD_DWEBP=OFF", "WEBP_BUILD_GIF2WEBP=OFF",
+        "WEBP_BUILD_IMG2WEBP=OFF", "WEBP_BUILD_VWEBP=OFF", "WEBP_BUILD_WEBPINFO=OFF", "WEBP_BUILD_WEBPMUX=OFF",
+        "WEBP_BUILD_ANIM_UTILS=OFF", "WEBP_BUILD_EXTRAS=OFF", "WEBP_BUILD_LIBWEBPMUX=ON", "WEBP_USE_THREAD=ON",
+        "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+      ],
+      "patches": []
+    },
+    {
+      "name": "libjxl",
+      "role": "JPEG XL encoder/decoder, lossless JPEG transcoding (replaces cjxl)",
+      "repository": "https://github.com/libjxl/libjxl.git",
+      "tag": "v0.13.0",
+      "commit": "5a7da83447212fe4900fc29ce97430b881caa67e",
+      "path": "native/libjxl",
+      "submodules": [
+        { "path": "third_party/brotli", "commit": "db24a98aed38a16de78cc05ca15cdd8dc2a0d92d", "license": "MIT" },
+        { "path": "third_party/highway", "commit": "457c891775a7397bdb0376bb1031e6e027af1c48", "license": "Apache-2.0" },
+        { "path": "third_party/skcms", "commit": "96d9171c94b937a1b5f0293de7309ac16311b722", "license": "BSD-3-Clause" }
+      ],
+      "license": "BSD-3-Clause",
+      "licenseFile": "native/libjxl/LICENSE",
+      "buildSystem": "cmake",
+      "buildOptions": [
+        "BUILD_SHARED_LIBS=OFF", "BUILD_TESTING=OFF", "JPEGXL_STATIC=ON", "JPEGXL_ENABLE_TOOLS=OFF",
+        "JPEGXL_ENABLE_DEVTOOLS=OFF", "JPEGXL_ENABLE_BENCHMARK=OFF", "JPEGXL_ENABLE_EXAMPLES=OFF",
+        "JPEGXL_ENABLE_JNI=OFF", "JPEGXL_ENABLE_SJPEG=OFF", "JPEGXL_ENABLE_OPENEXR=OFF",
+        "JPEGXL_ENABLE_VIEWERS=OFF", "JPEGXL_ENABLE_PLUGINS=OFF", "JPEGXL_ENABLE_TRANSCODE_JPEG=ON",
+        "JPEGXL_ENABLE_BOXES=ON", "JPEGXL_ENABLE_SKCMS=ON", "JPEGXL_FORCE_SYSTEM_BROTLI=OFF",
+        "JPEGXL_FORCE_SYSTEM_HWY=OFF", "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+      ],
+      "patches": []
+    },
+    {
+      "name": "mozjpeg",
+      "role": "JPEG encoder/decoder (libjpeg API) used for conversions to/from JPEG and as the codec library of the jpegoptim core",
+      "repository": "https://github.com/mozilla/mozjpeg.git",
+      "tag": "v4.1.5",
+      "commit": "6c9f0897afa1c2738d7222a0a9ab49e8b536a267",
+      "path": "native/libjpeg",
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "licenseFile": "native/libjpeg/LICENSE.md",
+      "buildSystem": "cmake",
+      "buildOptions": [
+        "ENABLE_SHARED=OFF", "ENABLE_STATIC=ON", "WITH_TURBOJPEG=OFF", "PNG_SUPPORTED=OFF", "WITH_JAVA=OFF",
+        "WITH_ARITH_DEC=ON", "WITH_ARITH_ENC=OFF", "REQUIRE_SIMD=OFF", "CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+      ],
+      "notes": "SIMD code needs NASM (installed by scripts/bootstrap.ps1); without it MozJPEG falls back to portable C (slower, identical output).",
+      "patches": []
+    },
+    {
+      "name": "jpegoptim",
+      "role": "JPEG optimization logic (Huffman optimization, progressive/baseline, marker policy). Only jpegmarker.c/.h are compiled unmodified; the optimizer core is adapted in native/shims/shim_jpegoptim.c.",
+      "repository": "https://github.com/tjko/jpegoptim.git",
+      "tag": "v1.5.6",
+      "commit": "d0c79a8eb4cac61d1d4797ad93d8a49ffdb1ec29",
+      "path": "native/jpegoptim",
+      "license": "GPL-3.0-or-later",
+      "licenseFile": "native/jpegoptim/COPYRIGHT",
+      "buildSystem": "cc (selected files only)",
+      "buildOptions": [],
+      "patches": [ "native/PATCHES.md#jpegoptim-adaptation-l-1-l-6" ]
+    }
+  ],
+  "rustCrates": [
+    { "name": "oxipng", "version": "10.2.1", "role": "PNG optimizer with Zopfli (replaces the oxipng CLI)", "license": "MIT", "features": ["parallel", "zopfli"] },
+    { "name": "zopfli", "version": "0.8.4", "role": "Deflate (transitive, via oxipng)", "license": "Apache-2.0" },
+    { "name": "libdeflater", "version": "1.26.1", "role": "Deflate (transitive, via oxipng)", "license": "Apache-2.0 / MIT" },
+    { "name": "png", "version": "0.18.1", "role": "Initial PNG writer and PNG metadata reader", "license": "MIT OR Apache-2.0" },
+    { "name": "image", "version": "0.25.10", "role": "BMP/TIFF/GIF decoding only (features bmp, tiff, gif)", "license": "MIT OR Apache-2.0" },
+    { "name": "rayon", "version": "1.12.0", "role": "File-level parallelism", "license": "MIT OR Apache-2.0" },
+    { "name": "clap", "version": "4.6.9", "role": "CLI", "license": "MIT OR Apache-2.0" },
+    { "name": "csv", "version": "1.4.0", "role": "CSV report", "license": "MIT OR Unlicense" },
+    { "name": "sysinfo", "version": "0.37.2", "role": "Memory-aware scheduling", "license": "MIT" },
+    { "name": "ctrlc", "version": "3.5.3", "role": "Ctrl+C cancellation", "license": "MIT OR Apache-2.0" },
+    { "name": "walkdir", "version": "2.5.1", "role": "Directory scanning", "license": "Unlicense OR MIT" }
+  ],
+  "rustCratesNote": "Exact versions of every transitive crate are locked in Cargo.lock; builds use --locked.",
+  "toolchain": { "rust": "1.97.0", "target": "x86_64-pc-windows-msvc", "cmake": ">=3.16", "nasm": "optional (MozJPEG SIMD)", "msvc": "Visual Studio 2022 Build Tools (MSVC v143, Windows SDK)" }
+}

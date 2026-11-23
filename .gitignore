@@ -1,0 +1,10 @@
+/target
+/dist/*
+!/dist/.gitkeep
+/native/build
+*.tmp
+# Upstream sources are fetched by scripts/bootstrap.ps1 at the commits pinned in native/dependencies.json
+/native/libwebp/
+/native/libjxl/
+/native/libjpeg/
+/native/jpegoptim/

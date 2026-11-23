@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned for reproducible builds. scripts/bootstrap.ps1 installs this toolchain and
+# adds the x86_64-pc-windows-msvc target on the developer machine.
+channel = "1.97.0"
+profile = "minimal"

@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-x64:
+    name: Windows x64 (MSVC static)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Ensure NASM and Ninja are available
+        run: |
+          if (-not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+            choco install nasm --no-progress -y
+          }
+          if (Test-Path 'C:\Program Files\NASM') {
+            'C:\Program Files\NASM' | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            choco install ninja --no-progress -y
+          }
+
+      - name: Cache pinned native upstream sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/libwebp
+            native/libjxl
+            native/libjpeg
+            native/jpegoptim
+          key: native-src-win-${{ hashFiles('native/dependencies.json') }}
+
+      - name: Bootstrap toolchain and native sources
+        run: pwsh -File scripts/bootstrap.ps1
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: win-x64-static-${{ hashFiles('build.rs', 'native/dependencies.json', 'native/shims/**') }}
+
+      - name: Build and run automated tests
+        run: pwsh -File scripts/build.ps1
+
+      - name: Verify standalone static executable
+        run: pwsh -File scripts/verify-build.ps1
+
+      - name: Upload Windows x64 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ImageOptimizer-windows-x64
+          path: |
+            dist/ImageOptimizer.exe
+            dist/ImageOptimizer.exe.sha256
+            dist/LICENSE
+            dist/THIRD-PARTY-NOTICES.md
+          if-no-files-found: error
+
+  linux-x64:
+    name: Linux x64 (tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build nasm g++
+
+      - name: Install pinned Rust toolchain
+        run: rustc --version
+
+      - name: Cache pinned native upstream sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            native/libwebp
+            native/libjxl
+            native/libjpeg
+            native/jpegoptim
+          key: native-src-linux-${{ hashFiles('native/dependencies.json') }}
+
+      - name: Fetch pinned native upstream sources
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+
+          with open("native/dependencies.json", "r", encoding="utf-8") as f:
+              deps = json.load(f)["native"]
+
+          def run(cmd, cwd=None):
+              subprocess.run(cmd, cwd=cwd, check=True)
+
+          for d in deps:
+              dest = d["path"]
+              if os.path.isdir(os.path.join(dest, ".git")):
+                  head = subprocess.check_output(["git", "-C", dest, "rev-parse", "HEAD"], text=True).strip()
+                  if head != d["commit"]:
+                      run(["git", "-C", dest, "fetch", "--depth", "1", "origin", "tag", d["tag"]])
+                      run(["git", "-C", dest, "checkout", "--detach", d["commit"]])
+              else:
+                  os.makedirs(os.path.dirname(dest), exist_ok=True)
+                  run(["git", "clone", "--depth", "1", "--branch", d["tag"], d["repository"], dest])
+                  run(["git", "-C", dest, "checkout", "--detach", d["commit"]])
+
+              head = subprocess.check_output(["git", "-C", dest, "rev-parse", "HEAD"], text=True).strip()
+              assert head == d["commit"], f"{d['name']}: {head} != {d['commit']}"
+              for s in d.get("submodules", []):
+                  run(["git", "-C", dest, "submodule", "update", "--init", "--depth", "1", "--", s["path"]])
+                  sh = subprocess.check_output(["git", "-C", os.path.join(dest, s["path"]), "rev-parse", "HEAD"], text=True).strip()
+                  assert sh == s["commit"], f"{d['name']}/{s['path']}: {sh} != {s['commit']}"
+              print(f"OK {d['name']} {d['tag']} @ {head[:12]}")
+          PY
+
+      - name: Cache Cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: linux-x64-${{ hashFiles('build.rs', 'native/dependencies.json', 'native/shims/**') }}
+
+      - name: Run automated tests
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: cargo test --locked
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows-x64, linux-x64]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download Windows x64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ImageOptimizer-windows-x64
+          path: release-files
+
+      - name: Package zip archive
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          (cd release-files && zip -9 "../ImageOptimizer-${TAG}-windows-x64.zip" ImageOptimizer.exe ImageOptimizer.exe.sha256 LICENSE THIRD-PARTY-NOTICES.md)
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release create "${TAG}" \
+            "ImageOptimizer-${TAG}-windows-x64.zip" \
+            "release-files/ImageOptimizer.exe" \
+            "release-files/ImageOptimizer.exe.sha256" \
+            --title "ImageOptimizer ${TAG}" \
+            --generate-notes
