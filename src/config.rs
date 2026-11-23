@@ -29,6 +29,7 @@ pub struct FileConfig {
     pub quality: Option<f32>,
     pub distance: Option<f32>,
     pub effort: Option<i32>,
+    pub brotli_effort: Option<i32>,
     pub method: Option<i32>,
     pub alpha_quality: Option<i32>,
     pub sharp_yuv: Option<bool>,
@@ -65,6 +66,7 @@ pub struct Settings {
     pub quality: Option<f32>,
     pub distance: Option<f32>,
     pub effort: Option<i32>,
+    pub brotli_effort: Option<i32>,
     pub method: Option<i32>,
     pub alpha_quality: Option<i32>,
     pub sharp_yuv: bool,
@@ -102,7 +104,8 @@ pub const DEFAULT_WEBP_METHOD: i32 = 6; // cwebp maximum -m 6
 pub const DEFAULT_JPEG_QUALITY: f32 = 75.0; // MozJPEG cjpeg default -quality 75
 pub const DEFAULT_JXL_DISTANCE: f32 = 1.0; // cjxl default -d 1.0 (visually lossless)
 pub const DEFAULT_JXL_EFFORT_LOSSY: i32 = 9; // highest standard lossy effort
-pub const DEFAULT_JXL_EFFORT_LOSSLESS: i32 = 10; // highest standard lossless effort
+pub const DEFAULT_JXL_EFFORT_LOSSLESS: i32 = 11; // maximum lossless effort (enables libjxl expert options)
+pub const DEFAULT_JXL_BROTLI_EFFORT: i32 = 11; // maximum Brotli effort for metadata boxes & JPEG transcoding
 
 fn range<T: PartialOrd + std::fmt::Display>(name: &str, v: T, lo: T, hi: T) -> Result<()> {
     if v < lo || v > hi {
@@ -184,7 +187,11 @@ impl Settings {
         }
         let effort = cli.effort.or(file.effort);
         if let Some(e) = effort {
-            range("--effort", e, 1, 10)?;
+            range("--effort", e, 1, 11)?;
+        }
+        let brotli_effort = cli.brotli_effort.or(file.brotli_effort);
+        if let Some(b) = brotli_effort {
+            range("--brotli-effort", b, 0, 11)?;
         }
         let method = cli.method.or(file.method);
         if let Some(m) = method {
@@ -218,6 +225,7 @@ impl Settings {
             quality,
             distance,
             effort,
+            brotli_effort,
             method,
             alpha_quality,
             sharp_yuv: cli.sharp_yuv || file.sharp_yuv.unwrap_or(false),

@@ -10,8 +10,9 @@ redistributable (static CRT).
 ## Design principles
 
 * **Upstream defaults, maximum optimization.** Each codec follows the default compression mode of the upstream tool it
-  is based on (`cjxl`, `cwebp`, `jpegoptim`, MozJPEG `cjpeg`, `oxipng`), paired with maximum standard compression
-  effort (OxiPNG preset 6 + Zopfli, WebP method 6, JPEG XL effort 9/10, MozJPEG max-compression profile).
+  is based on (`cjxl`, `cwebp`, `jpegoptim`, MozJPEG `cjpeg`, `oxipng`), paired with maximum compression effort
+  (OxiPNG preset 6 + Zopfli, WebP method 6, JPEG XL effort 9 lossy / effort 11 lossless with expert options +
+  `brotli_effort=11`, MozJPEG max-compression profile).
 * **First-class `--lossless` mode.** Add `--lossless` to enforce strict mathematically lossless encoding/transcoding
   across every codec, with automatic pixel/DCT/bitstream verification and guard rails that refuse inherently lossy
   routes instead of silently downgrading them.
@@ -32,9 +33,9 @@ redistributable (static CRT).
 # Single file -> single file (format inferred from output extension, no Reports/ created):
 ImageOptimizer photo.png photo.webp                     # cwebp: lossy q=75, method 6
 ImageOptimizer photo.png photo.webp -q 85               # custom quality (no --lossy needed)
-ImageOptimizer photo.png photo.jxl --lossless           # libjxl lossless, effort 10
+ImageOptimizer photo.png photo.jxl --lossless           # libjxl lossless, effort 11 + brotli_effort 11
 ImageOptimizer photo.png thumb.webp --resize 256x256    # downscale only (512x512 -> 256x256, never upscales)
-ImageOptimizer photo.jpg photo.jxl                      # cjxl lossless JPEG transcode, effort 10
+ImageOptimizer photo.jpg photo.jxl                      # cjxl lossless JPEG transcode, effort 11 + brotli_effort 11
 ImageOptimizer -i photo.png -o photo.jpg                # MozJPEG q=75, progressive, trellis
 ImageOptimizer photo.png optimized.png                  # OxiPNG preset 6 + Zopfli
 
@@ -56,8 +57,8 @@ ImageOptimizer photo.jpg smaller.jxl --lossy --distance 1.5
 | any → PNG | Initial PNG + OxiPNG preset 6 + Zopfli (`pixel-identical`) | Same |
 | JPEG → JPEG | `jpegoptim` lossless Huffman optimization (or `jpegoptim -m` if `--quality` given) | `jpegoptim` lossless (`dct-coefficients-identical`) |
 | non-JPEG → JPEG | MozJPEG `cjpeg` profile: q=75, progressive, trellis, optimized scans | Refused (`--lossless` forbids lossy JPEG encoding) |
-| JPEG → JXL | `cjxl` lossless JPEG transcode, effort 10 (`jpeg-bitstream-identical`); lossy if `--lossy`/`-q < 100`/`-d > 0` | `cjxl` lossless JPEG transcode, effort 10 (`jpeg-bitstream-identical`) |
-| non-JPEG → JXL | `cjxl` visually lossless `d=1.0`, effort 9 (or lossless if `-d 0` / `-q 100`) | `libjxl` lossless, effort 10 (`pixel-identical` RGBA16) |
+| JPEG → JXL | `cjxl` lossless JPEG transcode, effort 11 + brotli 11 (`jpeg-bitstream-identical`); lossy if `--lossy`/`-q < 100`/`-d > 0` | `cjxl` lossless JPEG transcode, effort 11 + brotli 11 (`jpeg-bitstream-identical`) |
+| non-JPEG → JXL | `cjxl` visually lossless `d=1.0`, effort 9 (or lossless effort 11 if `-d 0` / `-q 100`) | `libjxl` lossless, effort 11 + brotli 11 (`pixel-identical` RGBA16) |
 | any → WebP | `cwebp` lossy q=75, method 6, alpha_q=100 (optional `--sharp-yuv`) | `libwebp` lossless, q=100, method 6, `exact=1` (`pixel-identical`); 16-bit refused |
 | WebP → WebP (`original`) | Lossless VP8L stays lossless unless `--lossy`/`--quality`; lossy VP8 re-encodes at q=75, method 6 | Lossless VP8L optimized losslessly; lossy VP8 refused |
 
@@ -75,11 +76,12 @@ Run `ImageOptimizer --help`. Highlights:
 * **Modes:** default (upstream per-codec defaults + max effort), `--lossless` (strict lossless everywhere; conflicts
   with `--quality`, `--distance`, `--optimize-alpha`), `--lossy` (force lossy even on JPEG→JPEG / JPEG→JXL).
 * **Codec tuning:** `--quality` (default: 75 WebP, 75 JPEG, mapped to distance for JXL — **not comparable between codecs**),
-  `--distance` (JXL Butteraugli 0–25, default 1.0, 0 = lossless), `--effort` (JXL 1–10, default 9 lossy / 10 lossless),
-  `--method` (WebP 0–6, default 6), `--alpha-quality` (WebP 0–100, default 100), `--sharp-yuv` (WebP sharp RGB→YUV),
-  `--jpeg-mode keep|progressive|baseline|auto` (`auto` tests both baseline and progressive for JPEG→JPEG and keeps
-  the smaller file), `--png-preset` (0–6, default 6), `--optimize-alpha` (OxiPNG `-a`), `--no-zopfli`,
-  `--zopfli-iterations` (default 60), `--zopfli-no-improvement` (default 15).
+  `--distance` (JXL Butteraugli 0–25, default 1.0, 0 = lossless), `--effort` (JXL 1–11, default 9 lossy / 11 lossless
+  with expert options), `--brotli-effort` (JXL 0–11, default 11), `--method` (WebP 0–6, default 6), `--alpha-quality`
+  (WebP 0–100, default 100), `--sharp-yuv` (WebP sharp RGB→YUV), `--jpeg-mode keep|progressive|baseline|auto` (`auto`
+  tests both baseline and progressive for JPEG→JPEG and keeps the smaller file), `--png-preset` (0–6, default 6),
+  `--optimize-alpha` (OxiPNG `-a`), `--no-zopfli`, `--zopfli-iterations` (default 60), `--zopfli-no-improvement`
+  (default 15).
 * **Downscale-only resize:** `--resize <SPEC>` (`256x256` or `256` fits inside 256×256 preserving aspect ratio;
   `256x` clamps width; `x256` clamps height; `256x256!` clamps each axis independently). Images already within the
   requested bounds are never upscaled and keep lossless bitstream fast paths. `--resize-filter` selects the resampling

@@ -158,6 +158,9 @@ int shim_jxl_encode(const io_image *in, const jxl_params *p, io_buffer *out, cha
         }
     }
 
+    if (p->effort > 10) {
+        JxlEncoderAllowExpertOptions(enc);
+    }
     JxlEncoderFrameSettings *fs = JxlEncoderFrameSettingsCreate(enc, NULL);
     if (!fs) {
         rc = enc_fail(enc, "JxlEncoderFrameSettingsCreate", err);
@@ -166,6 +169,12 @@ int shim_jxl_encode(const io_image *in, const jxl_params *p, io_buffer *out, cha
     if (JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_EFFORT, p->effort) !=
         JXL_ENC_SUCCESS) {
         rc = enc_fail(enc, "setting effort", err);
+        goto done;
+    }
+    if (p->brotli_effort >= 0 &&
+        JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_BROTLI_EFFORT,
+                                         p->brotli_effort) != JXL_ENC_SUCCESS) {
+        rc = enc_fail(enc, "setting brotli effort", err);
         goto done;
     }
     if (p->lossless) {
@@ -228,6 +237,9 @@ int shim_jxl_encode_jpeg(const uint8_t *jpeg, size_t len, const jxl_params *p, i
         rc = enc_fail(enc, "JxlEncoderStoreJPEGMetadata", err);
         goto done;
     }
+    if (p->effort > 10) {
+        JxlEncoderAllowExpertOptions(enc);
+    }
     JxlEncoderFrameSettings *fs = JxlEncoderFrameSettingsCreate(enc, NULL);
     if (!fs) {
         rc = enc_fail(enc, "JxlEncoderFrameSettingsCreate", err);
@@ -236,6 +248,12 @@ int shim_jxl_encode_jpeg(const uint8_t *jpeg, size_t len, const jxl_params *p, i
     if (JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_EFFORT, p->effort) !=
         JXL_ENC_SUCCESS) {
         rc = enc_fail(enc, "setting effort", err);
+        goto done;
+    }
+    if (p->brotli_effort >= 0 &&
+        JxlEncoderFrameSettingsSetOption(fs, JXL_ENC_FRAME_SETTING_BROTLI_EFFORT,
+                                         p->brotli_effort) != JXL_ENC_SUCCESS) {
+        rc = enc_fail(enc, "setting brotli effort", err);
         goto done;
     }
     if (JxlEncoderAddJPEGFrame(fs, jpeg, len) != JXL_ENC_SUCCESS) {

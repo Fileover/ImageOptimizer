@@ -83,12 +83,13 @@ int shim_webp_encode(const io_image *in, const webp_params *p, io_buffer *out, c
 
 /* ------------------------------------------------------------------- libjxl */
 typedef struct {
-    int lossless;   /* 1 = JxlEncoderSetFrameLossless                          */
-    float distance; /* used when lossless == 0                                 */
-    int effort;     /* 1..10                                                   */
+    int lossless;       /* 1 = JxlEncoderSetFrameLossless                          */
+    float distance;     /* used when lossless == 0                                 */
+    int effort;         /* 1..11 (11 enables JxlEncoderAllowExpertOptions)         */
+    int brotli_effort;  /* -1 = libjxl default, 0..11                              */
     int threads;
-    int orientation; /* EXIF orientation 1..8 stored in the codestream header   */
-    int store_metadata; /* 1 = write Exif / XMP boxes                            */
+    int orientation;    /* EXIF orientation 1..8 stored in the codestream header   */
+    int store_metadata; /* 1 = write Exif / XMP boxes                              */
 } jxl_params;
 
 uint32_t shim_jxl_encoder_version(void);

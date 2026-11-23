@@ -64,7 +64,7 @@ fn fixture_dir() -> Fixture {
     let jxl = libjxl::encode(
         &raster,
         &Default::default(),
-        &libjxl::JxlOptions { lossless: true, distance: 0.0, effort: 3, threads: 1, store_metadata: true },
+        &libjxl::JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true },
     )
     .unwrap();
     std::fs::write(input.join("e.jxl"), jxl).unwrap();

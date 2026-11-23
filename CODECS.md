@@ -2,7 +2,7 @@
 
 | Upstream tool | Library in this exe | Upstream default mode | Max-optimization defaults here |
 |---|---|---|---|
-| cjxl | libjxl 0.13.0 (+ brotli, highway, skcms) | JPEG: lossless transcode · other: lossy `d=1.0` | effort 10 (lossless) / effort 9 (lossy) |
+| cjxl | libjxl 0.13.0 (+ brotli, highway, skcms) | JPEG: lossless transcode · other: lossy `d=1.0` | effort 11 (lossless, expert options) / effort 9 (lossy), `brotli_effort=11` |
 | cwebp | libwebp 1.6.0 (+ mux/demux/sharpyuv) | lossy `q=75`, `alpha_q=100` | method 6 (`-m 6`); `--lossless` → `q=100, m=6, exact=1` |
 | jpegoptim | jpegoptim 1.5.6 core, on MozJPEG 4.1.5 | lossless Huffman optimization (`-m` for lossy max quality) | MozJPEG DC scan opt; `--jpeg-mode auto` tries baseline & progressive |
 | cjpeg (MozJPEG) | MozJPEG 4.1.5 | lossy `q=75`, progressive, trellis | `JCP_MAX_COMPRESSION` profile (trellis, optimized scans, `optimize_coding`) |
@@ -10,14 +10,17 @@
 
 ## JPEG XL (libjxl / cjxl)
 * **Default mode (matches `cjxl`):**
-  * **JPEG sources:** `JxlEncoderStoreJPEGMetadata` + `JxlEncoderAddJPEGFrame` (reversible lossless transcode, effort 10).
-    Verification decodes the JXL back to JPEG and requires **byte equality**. Passing `--lossy`, `--distance > 0`, or
-    `--quality < 100` switches JPEG sources to decoded pixel re-encoding.
+  * **JPEG sources:** `JxlEncoderStoreJPEGMetadata` + `JxlEncoderAddJPEGFrame` (reversible lossless transcode, effort 11
+    via `JxlEncoderAllowExpertOptions`, `brotli_effort=11`). Verification decodes the JXL back to JPEG and requires
+    **byte equality**. Passing `--lossy`, `--distance > 0`, or `--quality < 100` switches JPEG sources to decoded pixel
+    re-encoding.
   * **Non-JPEG sources:** Butteraugli `distance = 1.0` (visually lossless, `cjxl` default), effort 9 (override with
-    `--effort`). Passing `--distance 0` or `--quality 100` (without `--lossy`) selects mathematically lossless encoding
-    at effort 10, matching `cjxl -d 0` / `cjxl -q 100`.
+    `--effort 1..11`), `brotli_effort=11` (override with `--brotli-effort 0..11`). Passing `--distance 0` or
+    `--quality 100` (without `--lossy`) selects mathematically lossless encoding at effort 11, matching
+    `cjxl --distance=0 --effort=11 --allow_expert_options --brotli_effort=11`.
 * **`--lossless` mode:** `JxlEncoderSetFrameLossless`, original color profile kept (`uses_original_profile=true`),
-  effort 10 for pixel inputs; lossless JPEG transcoding for JPEG inputs.
+  effort 11 (with `JxlEncoderAllowExpertOptions`) + `brotli_effort=11` for pixel inputs; lossless JPEG transcoding for
+  JPEG inputs. Pass `--effort 10` (or lower) if faster lossless encoding is preferred on large images.
 * **`--lossy` mode:** forces lossy encoding (even for JPEG inputs); quality 100 / distance 0 is rejected under `--lossy`.
 * EXIF/XMP stored in `Exif`/`xml ` boxes; EXIF orientation is written to the codestream header and the stored pixels are
   not rotated. Decoding for display applies orientation; decoding for verification does not.

@@ -9,7 +9,8 @@
 
 use super::{Ctx, Encoded, Verification};
 use crate::config::{
-    Mode, DEFAULT_JXL_DISTANCE, DEFAULT_JXL_EFFORT_LOSSLESS, DEFAULT_JXL_EFFORT_LOSSY,
+    Mode, DEFAULT_JXL_BROTLI_EFFORT, DEFAULT_JXL_DISTANCE, DEFAULT_JXL_EFFORT_LOSSLESS,
+    DEFAULT_JXL_EFFORT_LOSSY,
 };
 use crate::engines::libjxl::{self, JxlOptions};
 use crate::errors::{Error, Result};
@@ -37,11 +38,13 @@ pub fn should_transcode_jpeg(ctx: &Ctx) -> bool {
 /// Resolves pixel-encoding options for JPEG XL following `cjxl` defaults + maximum effort.
 pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
     let s = ctx.settings;
+    let brotli_effort = s.brotli_effort.unwrap_or(DEFAULT_JXL_BROTLI_EFFORT);
     match s.mode {
         Mode::Lossless => Ok(JxlOptions {
             lossless: true,
             distance: 0.0,
             effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
+            brotli_effort,
             threads: ctx.threads,
             store_metadata: !s.strip_metadata,
         }),
@@ -61,6 +64,7 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
                 lossless: false,
                 distance,
                 effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSY),
+                brotli_effort,
                 threads: ctx.threads,
                 store_metadata: !s.strip_metadata,
             })
@@ -76,6 +80,7 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
                     lossless: true,
                     distance: 0.0,
                     effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
+                    brotli_effort,
                     threads: ctx.threads,
                     store_metadata: !s.strip_metadata,
                 })
@@ -84,6 +89,7 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
                     lossless: false,
                     distance,
                     effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSY),
+                    brotli_effort,
                     threads: ctx.threads,
                     store_metadata: !s.strip_metadata,
                 })
@@ -94,11 +100,12 @@ pub fn options(ctx: &Ctx) -> Result<JxlOptions> {
 
 fn describe(o: &JxlOptions, what: &str) -> String {
     format!(
-        "libjxl {}: {what} lossless={} distance={} effort={} threads={}",
+        "libjxl {}: {what} lossless={} distance={} effort={} brotli_effort={} threads={}",
         libjxl::encoder_version(),
         o.lossless,
         o.distance,
         o.effort,
+        o.brotli_effort,
         o.threads
     )
 }
@@ -121,6 +128,7 @@ pub fn transcode_jpeg(ctx: &Ctx, jpeg: &[u8]) -> Result<Encoded> {
         lossless: true,
         distance: 0.0,
         effort: s.effort.unwrap_or(DEFAULT_JXL_EFFORT_LOSSLESS),
+        brotli_effort: s.brotli_effort.unwrap_or(DEFAULT_JXL_BROTLI_EFFORT),
         threads: ctx.threads,
         store_metadata: !s.strip_metadata,
     };

@@ -72,9 +72,12 @@ pub struct Cli {
     /// JPEG XL Butteraugli distance 0-25 (0 = lossless, default 1.0; overrides --quality for JPEG XL)
     #[arg(long, value_name = "D")]
     pub distance: Option<f32>,
-    /// JPEG XL effort 1-10 (default: 9 lossy, 10 lossless)
-    #[arg(long, value_name = "1-10")]
+    /// JPEG XL effort 1-11 (default: 9 lossy, 11 lossless with expert options)
+    #[arg(long, value_name = "1-11")]
     pub effort: Option<i32>,
+    /// JPEG XL Brotli compression effort 0-11 (default: 11, maximum compression)
+    #[arg(long, value_name = "0-11")]
+    pub brotli_effort: Option<i32>,
     /// WebP compression method 0-6 (default: 6, maximum compression)
     #[arg(long, value_name = "0-6")]
     pub method: Option<i32>,

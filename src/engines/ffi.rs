@@ -80,6 +80,7 @@ pub struct JxlParams {
     pub lossless: c_int,
     pub distance: c_float,
     pub effort: c_int,
+    pub brotli_effort: c_int,
     pub threads: c_int,
     pub orientation: c_int,
     pub store_metadata: c_int,

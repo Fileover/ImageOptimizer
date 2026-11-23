@@ -12,8 +12,10 @@ pub struct JxlOptions {
     pub lossless: bool,
     /// Butteraugli distance (lossy only). 0.0 is rejected: use `lossless`.
     pub distance: f32,
-    /// 1..=10 (11 would need JxlEncoderAllowExpertOptions and is intentionally not exposed).
+    /// 1..=11 (11 automatically enables `JxlEncoderAllowExpertOptions`).
     pub effort: i32,
+    /// Brotli compression effort for metadata boxes and JPEG transcoding (`-1` default, `0..=11`).
+    pub brotli_effort: i32,
     pub threads: i32,
     pub store_metadata: bool,
 }
@@ -41,6 +43,7 @@ fn params(o: &JxlOptions, orientation: u16) -> JxlParams {
         lossless: o.lossless as i32,
         distance: o.distance,
         effort: o.effort,
+        brotli_effort: o.brotli_effort,
         threads: o.threads,
         orientation: orientation as i32,
         store_metadata: o.store_metadata as i32,

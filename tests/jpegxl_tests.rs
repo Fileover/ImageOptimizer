@@ -5,7 +5,7 @@ use image_optimizer::formats::{jpegxl, Verification};
 use image_optimizer::image::color::Samples;
 
 fn lossless_opts() -> JxlOptions {
-    JxlOptions { lossless: true, distance: 0.0, effort: 3, threads: 1, store_metadata: true }
+    JxlOptions { lossless: true, distance: 0.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true }
 }
 
 #[test]
@@ -83,8 +83,16 @@ fn pixel_jxl_defaults_to_cjxl_distance_1_and_supports_lossless_flags() {
         let o = jpegxl::options(&ctx(&s)).unwrap();
         assert!(o.lossless, "{extra:?} must resolve to lossless JXL");
         assert_eq!(o.distance, 0.0);
-        assert_eq!(o.effort, 10);
+        assert_eq!(o.effort, 11);
+        assert_eq!(o.brotli_effort, 11);
     }
+
+    // Effort 11 (expert options) + brotli_effort 11 actually encodes and roundtrips pixel-exact.
+    let small = pattern(24, 24, 4, 8);
+    let expert_opts = JxlOptions { lossless: true, distance: 0.0, effort: 11, brotli_effort: 11, threads: 1, store_metadata: true };
+    let encoded = libjxl::encode(&small, &metadata(1), &expert_opts).unwrap();
+    let decoded = libjxl::decode(&encoded, 1 << 26, 1, true).unwrap();
+    assert_eq!(rgba16(&decoded.raster), rgba16(&small));
 
     // Explicit --lossy rejects quality 100 / distance 0 so it never silently turns lossless.
     let s_bad = settings(&["--lossy", "--quality", "100"]);
@@ -101,7 +109,7 @@ fn pixel_jxl_has_no_jpeg_reconstruction_data() {
 fn lossy_is_smaller_and_decodable() {
     let r = pattern(64, 64, 3, 8);
     let lossless = libjxl::encode(&r, &Default::default(), &lossless_opts()).unwrap();
-    let lossy_opts = JxlOptions { lossless: false, distance: 2.0, effort: 3, threads: 1, store_metadata: true };
+    let lossy_opts = JxlOptions { lossless: false, distance: 2.0, effort: 3, brotli_effort: 11, threads: 1, store_metadata: true };
     let lossy = libjxl::encode(&r, &Default::default(), &lossy_opts).unwrap();
     assert!(lossy.len() < lossless.len());
     let d = libjxl::decode(&lossy, 1 << 26, 1, true).unwrap();

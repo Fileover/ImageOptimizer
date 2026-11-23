@@ -9,6 +9,8 @@
   vs progressive comparison), `--sharp-yuv` for lossy WebP, and `--optimize-alpha` for PNG.
 * Metadata preserved by default across all codecs (`--strip-metadata` / `--strip-icc`); magic-byte detection;
   verification matrix; atomic writes.
+* JPEG XL lossless maximum optimization: unlocked `--effort 11` (automatically calling `JxlEncoderAllowExpertOptions`)
+  and added `--brotli-effort 0..11` (default `11`), matching `cjxl --distance=0 --effort=11 --allow_expert_options --brotli_effort=11`.
 * Downscale-only resizing (`--resize 256x256`, `256x`, `x256`, `256x256!`) with selectable resampling filter
   (`--resize-filter`, default `lanczos3`), premultiplied-alpha handling, and EXIF orientation normalization; never
   upscales and keeps lossless bitstream fast paths for images already within bounds.
