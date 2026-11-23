@@ -189,6 +189,7 @@ impl Settings {
             None => FileConfig::default(),
         };
 
+        let mode = resolve_mode(cli, &file)?;
         let input = cli
             .input
             .clone()
@@ -201,8 +202,6 @@ impl Settings {
             .or_else(|| cli.output_pos.clone())
             .or(file.output)
             .ok_or_else(|| Error::Invalid("OUTPUT path (or --output) is required".into()))?;
-
-        let mode = resolve_mode(cli, &file)?;
         let max_compression = cli.max_compression || file.max_compression.unwrap_or(false);
         let quality = cli.quality.or(file.quality);
         let distance = cli.distance.or(file.distance);
