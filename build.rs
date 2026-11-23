@@ -152,7 +152,9 @@ fn cmake_static(
         .define("CMAKE_POSITION_INDEPENDENT_CODE", "ON")
         // Build every dependency with the static CRT on MSVC (/MT) so that the final
         // executable does not need the Visual C++ Redistributable.
-        .define("CMAKE_POLICY_DEFAULT_CMP0091", "NEW");
+        .define("CMAKE_POLICY_DEFAULT_CMP0091", "NEW")
+        // CMake 4.x removed compatibility with cmake_minimum_required < 3.5 (used by MozJPEG 4.1.5).
+        .define("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
     if is_msvc {
         cfg.define("CMAKE_MSVC_RUNTIME_LIBRARY", "MultiThreaded");
         cfg.static_crt(true);
