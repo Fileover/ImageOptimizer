@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.0 — unreleased
-* First implementation: JPEG XL, WebP, JPEG and PNG engines linked statically (libjxl 0.13.0, libwebp 1.6.0,
+## 0.1.0 — 2026-11-23
+* First release: JPEG XL, WebP, JPEG and PNG engines linked statically (libjxl 0.13.0, libwebp 1.6.0,
   MozJPEG 4.1.5 + jpegoptim 1.5.6 core, OxiPNG 10.2.1/Zopfli).
+* Running `ImageOptimizer` with no arguments prints version, linked engines, usage, and common examples.
 * Canonical CLI invocation `ImageOptimizer [OPTIONS] <INPUT> <OUTPUT>` matching exact upstream tool defaults and flags:
   `cjxl` (`-d`, `-e`, `--allow_expert_options`, `--brotli_effort`, `--lossless_jpeg`; default `d=1.0, e=7, brotli=9`),
   `cwebp` (`-q`, `-m`, `--lossless-preset`, `--alpha_q`, `--exact`, `--sharp_yuv`; default `q=75, m=4`),

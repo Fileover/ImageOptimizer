@@ -48,6 +48,33 @@ pub fn version_text() -> String {
     s
 }
 
+/// Concise overview shown when invoked without any arguments.
+pub fn intro_text() -> String {
+    format!(
+        "{APP_NAME} {APP_VERSION} - single-executable image optimizer and converter\n\
+         Engines: libjxl {} | libwebp {} | {} + jpegoptim 1.5.6 | oxipng {}\n\
+         \n\
+         Usage:\n\
+           {APP_NAME} [OPTIONS] <INPUT> <OUTPUT>\n\
+         \n\
+         Examples:\n\
+           {APP_NAME} photo.png photo.jxl\n\
+           {APP_NAME} --distance=0 --effort=11 --allow_expert_options --brotli_effort=11 photo.png photo.jxl\n\
+           {APP_NAME} --lossless --max-compression photo.png photo.jxl\n\
+           {APP_NAME} -q 80 -m 6 --sharp_yuv photo.png photo.webp\n\
+           {APP_NAME} --opt max -z photo.png optimized.png\n\
+           {APP_NAME} --max=85 --all-progressive photo.jpg optimized.jpg\n\
+           {APP_NAME} --resize 256 --lossless --max-compression photo.png thumb.jxl\n\
+           {APP_NAME} --format jxl --recursive --input D:\\Images --output D:\\Output\n\
+         \n\
+         Run '{APP_NAME} --help' for all options, '--list-formats' for formats, or '--version' for details.\n",
+        libjxl::encoder_version(),
+        libwebp::version(),
+        mozjpeg::version(),
+        oxipng::version(),
+    )
+}
+
 pub fn formats_text() -> &'static str {
     "Input formats (detected by file signature, not by extension):\n  PNG (incl. APNG, optimized in place only)\n  JPEG (baseline/progressive/arithmetic decode)\n  WebP (still images; animated WebP is refused)\n  JPEG XL (still images; animated JPEG XL is refused)\n  BMP, TIFF, GIF (GIF: single-frame only; animated GIF is refused)\n\nOutput formats (--format) and upstream defaults (add --lossless for strict lossless, --max-compression for maximum effort):\n  jxl       JPEG XL via libjxl (cjxl defaults: d=1.0, e=7, brotli_effort=9; lossless JPEG transcode for JPEGs)\n  webp      WebP via libwebp (cwebp defaults: lossy q=75, m=4, alpha_q=100; --lossless / --lossless-preset 0..9 / --exact)\n  jpeg      JPEG: jpegoptim core (lossless default, --max=N for lossy) for JPEGs; MozJPEG cjpeg (q=75, progressive, trellis) for conversions\n  png       PNG via OxiPNG (--opt 2 libdeflate default; -z/--zopfli for Zopfli, -a/--alpha for transparent RGB)\n  original  optimize each file in its own format (PNG, JPEG, WebP, JPEG XL)\n"
 }

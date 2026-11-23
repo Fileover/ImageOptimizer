@@ -440,3 +440,13 @@ fn version_and_format_listing() {
     }
     assert!(stdout(&run(&["--list-formats"])).contains("JPEG XL"));
 }
+
+#[test]
+fn no_arguments_prints_overview_and_exits_cleanly() {
+    let o = run(&[]);
+    assert_eq!(o.status.code(), Some(0));
+    let out = stdout(&o);
+    for needle in ["ImageOptimizer", "libjxl", "libwebp", "mozjpeg", "oxipng", "Usage:", "--help"] {
+        assert!(out.contains(needle), "no-arg output should mention {needle}: {out}");
+    }
+}
